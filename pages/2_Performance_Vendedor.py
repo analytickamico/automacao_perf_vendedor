@@ -171,6 +171,10 @@ def create_dashboard(df, brand_data, cod_colaborador, start_date, end_date, sele
 
 def main():
     try:
+        # Inicialize 'selected_colaboradores' se não existir
+        if 'selected_colaboradores' not in st.session_state:
+            st.session_state['selected_colaboradores'] = []
+            
         st.sidebar.title('Configurações do Dashboard')
         
         st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ""))
@@ -207,7 +211,7 @@ def main():
                     st.session_state['selected_channels'],
                     st.session_state['selected_ufs'],
                     None,
-                    st.session_state['selected_colaboradores']
+                    None
                 )
                 st.session_state['brand_data'] = get_brand_data_cached(
                     st.session_state['cod_colaborador'],
@@ -215,7 +219,7 @@ def main():
                     st.session_state['end_date'],
                     st.session_state['selected_channels'],
                     st.session_state['selected_ufs'],
-                    st.session_state['selected_colaboradores']
+                    None
                 )
             st.session_state['data_needs_update'] = False
 
@@ -224,7 +228,7 @@ def main():
         
         available_brands = brand_data['marca'].unique().tolist() if not brand_data.empty else []
         st.session_state['selected_brands'] = st.sidebar.multiselect("Selecione as marcas (deixe vazio para todas)", options=available_brands, default=st.session_state.get('selected_brands', []))
-        
+        #selected_colaboradores = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state.get('selected_colaboradores', []))
         show_additional_info = st.sidebar.checkbox("Mostrar informações adicionais", False)
         
         create_dashboard(df, brand_data, st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'], st.session_state['selected_brands'], st.session_state['selected_colaboradores'], show_additional_info)
