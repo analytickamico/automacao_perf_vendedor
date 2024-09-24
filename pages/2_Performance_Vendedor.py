@@ -24,10 +24,10 @@ def get_colaboradores_cached(start_date, end_date, selected_channels, selected_u
 def create_dashboard(df, brand_data, cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_colaboradores, show_additional_info):
 
     # Mostrar informações sobre as colunas disponíveis
-    st.write("Colunas disponíveis no DataFrame principal:")
-    st.write(df.columns.tolist())
-    st.write("Colunas disponíveis nos dados de marca:")
-    st.write(brand_data.columns.tolist())
+    #st.write("Colunas disponíveis no DataFrame principal:")
+    #st.write(df.columns.tolist())
+    #st.write("Colunas disponíveis nos dados de marca:")
+    #st.write(brand_data.columns.tolist())
 
     # Filtrar o DataFrame por colaboradores selecionados
     #df = filter_dataframe_by_colaboradores(df, selected_colaboradores)
@@ -63,24 +63,35 @@ def create_dashboard(df, brand_data, cod_colaborador, start_date, end_date, sele
     latest_month = df['mes_ref'].max()
     latest_data = df[df['mes_ref'] == latest_month].groupby('mes_ref').sum().iloc[0]
 
-    # Métricas
+    # Cálculo dos percentuais
+    desconto_percentual = (latest_data['desconto'] / latest_data['faturamento_bruto']) * 100 if latest_data['faturamento_bruto'] != 0 else 0
+    bonificacao_percentual = (latest_data['valor_bonificacao'] / latest_data['faturamento_liquido']) * 100 if latest_data['faturamento_liquido'] != 0 else 0
+
+# Métricas
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:        
         st.metric("Faturamento", f"R$ {latest_data['faturamento_liquido']:,.2f}")
     with col2:
         st.metric("Desconto", f"R$ {latest_data['desconto']:,.2f}")
+        st.markdown(f"<p style='font-size: medium; color: green;'>({desconto_percentual:.2f}% do faturamento bruto)</p>", unsafe_allow_html=True)
     with col3:
-        st.metric("Bonificação", f"R$ {latest_data['valor_bonificacao']:,.2f}")        
-    with col4:
-        st.metric("Clientes Únicos", f"{latest_data['positivacao']:,}")
-    with col5:
-        st.metric("Pedidos", f"{latest_data['qtd_pedido']:,}")
-
-    col_markup = st.columns(1)[0]
-    with col_markup:        
+        st.metric("Bonificação", f"R$ {latest_data['valor_bonificacao']:,.2f}")
+        st.markdown(f"<p style='font-size: medium; color: green;'>({bonificacao_percentual:.2f}% do faturamento líquido)</p>", unsafe_allow_html=True)
+    #with col4:
+        #st.metric("Clientes Únicos", f"{latest_data['positivacao']:,}")
+    #with col5:
+        #st.metric("Pedidos", f"{latest_data['qtd_pedido']:,}")
+     
+    col1, col2, col3, col4, col5 = st.columns(5)
+    #col_markup = st.columns(1)[0]
+    with col1:        
         # Ajustando o formato do markup para ser igual ao da tabela
         markup_value = latest_data['markup_percentual'] / 100 + 1
         st.metric("Markup", f"{markup_value:.2f}")
+    with col2:
+        st.metric("Clientes Únicos", f"{latest_data['positivacao']:,}")
+    with col3:
+        st.metric("Pedidos", f"{latest_data['qtd_pedido']:,}")
 
     # Gráfico de Faturamento e Positivações ao longo do tempo
     fig_time = make_subplots(specs=[[{"secondary_y": True}]])
@@ -132,7 +143,7 @@ def create_dashboard(df, brand_data, cod_colaborador, start_date, end_date, sele
     fig_time.update_yaxes(title_text="Clientes Únicos", secondary_y=True)
 
     st.plotly_chart(fig_time, use_container_width=True)
-
+    st.divider()
     if not brand_data.empty and 'marca' in brand_data.columns:
         st.write("Dados por marca:")
         
@@ -154,14 +165,19 @@ def create_dashboard(df, brand_data, cod_colaborador, start_date, end_date, sele
         desired_columns = ['marca', 'faturamento', 'share', 'clientes_unicos', 'qtd_pedido', 'qtd_sku', 'Ticket_Medio_Positivacao', 'markup']
         
         # Criando um novo DataFrame com as colunas desejadas
-        display_data = brand_data[desired_columns].copy()
+        display_data = brand_data[desired_columns].copy().set_index('marca')
         
         # Formatando as colunas numéricas
         display_data['faturamento'] = display_data['faturamento'].apply(lambda x: f"R$ {x:,.2f}")
         display_data['Ticket_Medio_Positivacao'] = display_data['Ticket_Medio_Positivacao'].apply(lambda x: f"R$ {x:,.2f}")
         display_data['share'] = display_data['share'].apply(lambda x: f"{x:.2%}")
         
-        st.dataframe(display_data)
+        st.dataframe(display_data,
+                     column_config={
+                         "share": st.column_config.ProgressColumn(
+                             "share"
+                         )
+                     })
     else:
         st.warning("Não há dados por marca disponíveis para o período e/ou filtros selecionados.")
 
@@ -171,38 +187,64 @@ def create_dashboard(df, brand_data, cod_colaborador, start_date, end_date, sele
 
 def main():
     try:
-        # Inicialize 'selected_colaboradores' se não existir
-        if 'selected_colaboradores' not in st.session_state:
+        st.set_page_config(page_title="Dashboard de Vendas", layout="wide")
+
+        # Inicialização do estado da sessão
+        if 'initialized' not in st.session_state:
+            st.session_state['initialized'] = True
+            st.session_state['cod_colaborador'] = ""
+            st.session_state['start_date'] = date(2024, 1, 1)
+            st.session_state['end_date'] = date.today()
+            st.session_state['selected_channels'] = []
+            st.session_state['selected_ufs'] = []
             st.session_state['selected_colaboradores'] = []
-            
+            st.session_state['selected_brands'] = []
+            st.session_state['data_needs_update'] = True
+
         st.sidebar.title('Configurações do Dashboard')
         
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ""))
-        
-        st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date', date(2024, 1, 1)))
-        st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date', date.today()))
-        
-        # Atualizar canais e UFs com base no colaborador selecionado
+        # Código do Colaborador
+        new_cod_colaborador = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state['cod_colaborador'])
+        if new_cod_colaborador != st.session_state['cod_colaborador']:
+            st.session_state['cod_colaborador'] = new_cod_colaborador
+            st.session_state['data_needs_update'] = True
+
+        # Datas
+        new_start_date = st.sidebar.date_input("Data Inicial", st.session_state['start_date'])
+        new_end_date = st.sidebar.date_input("Data Final", st.session_state['end_date'])
+        if new_start_date != st.session_state['start_date'] or new_end_date != st.session_state['end_date']:
+            st.session_state['start_date'] = new_start_date
+            st.session_state['end_date'] = new_end_date
+            st.session_state['data_needs_update'] = True
+
+        # Atualizar canais e UFs
         channels, ufs = get_channels_and_ufs_cached(st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'])
         
-        st.session_state['selected_channels'] = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state.get('selected_channels', []))
-        st.session_state['selected_ufs'] = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state.get('selected_ufs', []))
-        
-        # Adicionar seleção de colaboradores
+        # Canais de Venda
+        new_selected_channels = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state['selected_channels'])
+        if new_selected_channels != st.session_state['selected_channels']:
+            st.session_state['selected_channels'] = new_selected_channels
+            st.session_state['data_needs_update'] = True
+
+        # UFs
+        new_selected_ufs = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state['selected_ufs'])
+        if new_selected_ufs != st.session_state['selected_ufs']:
+            st.session_state['selected_ufs'] = new_selected_ufs
+            st.session_state['data_needs_update'] = True
+
+        # Colaboradores
         if not st.session_state['cod_colaborador']:
             colaboradores_df = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
             available_colaboradores = colaboradores_df['nome_colaborador'].tolist()
-            selected_colaboradores = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state.get('selected_colaboradores', []))
-            
-            # Verificar se a seleção de colaboradores mudou
-            if selected_colaboradores != st.session_state.get('selected_colaboradores', []):
-                st.session_state['selected_colaboradores'] = selected_colaboradores
+            new_selected_colaboradores = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state['selected_colaboradores'])
+            if new_selected_colaboradores != st.session_state['selected_colaboradores']:
+                st.session_state['selected_colaboradores'] = new_selected_colaboradores
                 st.session_state['data_needs_update'] = True
         else:
             st.session_state['selected_colaboradores'] = []
 
         # Carregar ou recarregar dados se necessário
-        if 'df' not in st.session_state or 'brand_data' not in st.session_state or st.session_state.get('data_needs_update', True):
+        if st.session_state['data_needs_update']:
             with st.spinner('Carregando dados...'):
                 st.session_state['df'] = get_monthly_revenue_cached(
                     st.session_state['cod_colaborador'],
@@ -211,7 +253,7 @@ def main():
                     st.session_state['selected_channels'],
                     st.session_state['selected_ufs'],
                     None,
-                    None
+                    st.session_state['selected_colaboradores']
                 )
                 st.session_state['brand_data'] = get_brand_data_cached(
                     st.session_state['cod_colaborador'],
@@ -226,9 +268,13 @@ def main():
         df = st.session_state['df']
         brand_data = st.session_state['brand_data']
         
+        # Marcas
         available_brands = brand_data['marca'].unique().tolist() if not brand_data.empty else []
-        st.session_state['selected_brands'] = st.sidebar.multiselect("Selecione as marcas (deixe vazio para todas)", options=available_brands, default=st.session_state.get('selected_brands', []))
-        #selected_colaboradores = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state.get('selected_colaboradores', []))
+        new_selected_brands = st.sidebar.multiselect("Selecione as marcas (deixe vazio para todas)", options=available_brands, default=st.session_state['selected_brands'])
+        if new_selected_brands != st.session_state['selected_brands']:
+            st.session_state['selected_brands'] = new_selected_brands
+            st.session_state['data_needs_update'] = True
+
         show_additional_info = st.sidebar.checkbox("Mostrar informações adicionais", False)
         
         create_dashboard(df, brand_data, st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'], st.session_state['selected_brands'], st.session_state['selected_colaboradores'], show_additional_info)
