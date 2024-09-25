@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from utils import get_channels_and_ufs, get_monthly_revenue, get_brand_data, get_rfm_summary, create_rfm_heatmap, get_colaboradores
+from utils import get_channels_and_ufs, get_monthly_revenue, get_brand_data, get_rfm_summary, create_rfm_heatmap, get_colaboradores,get_client_status
 
 st.set_page_config(page_title="Dashboard de Vendas", layout="wide")
 
