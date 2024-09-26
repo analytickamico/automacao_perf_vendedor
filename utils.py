@@ -1,18 +1,24 @@
-import os
-import logging
-from pyathena import connect
-import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
-from pyathena.pandas.util import as_pandas
+import pandas as pd
+from datetime import date, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import date, timedelta
-from streamlit_plotly_events import plotly_events
 import numpy as np
+import logging
+from pyathena import connect
+from dotenv import load_dotenv
+from pyathena.pandas.util import as_pandas
+import os
 
 
-__all__ = ['get_monthly_revenue', 'get_brand_data', 'get_channels_and_ufs', 'get_colaboradores', 'get_client_status', 'create_client_status_chart']
+__all__ = [
+    'get_monthly_revenue_cached', 'get_brand_data_cached', 'get_channels_and_ufs_cached',
+    'get_colaboradores_cached', 'get_rfm_summary_cached', 'get_rfm_heatmap_data_cached',
+    'query_athena', 'get_monthly_revenue', 'get_brand_data', 'get_rfm_summary',
+    'get_rfm_segment_clients', 'get_rfm_heatmap_data', 'create_rfm_heatmap_from_aggregated',
+    'get_channels_and_ufs', 'get_colaboradores', 'get_client_status',
+    'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache'
+]
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,6 +32,45 @@ ATHENA_REGION = os.environ.get('ATHENA_REGION', 'us-east-1')
 
 logging.info(f"Usando ATHENA_S3_STAGING_DIR: {ATHENA_S3_STAGING_DIR}")
 logging.info(f"Usando ATHENA_REGION: {ATHENA_REGION}")
+
+# Funções cacheadas
+@st.cache_data
+def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador):
+    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador)
+
+@st.cache_data
+def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador):
+    logging.info(f"Chamando get_brand_data_cached com os seguintes parâmetros:")
+    logging.info(f"cod_colaborador: {cod_colaborador}")
+    logging.info(f"start_date: {start_date}")
+    logging.info(f"end_date: {end_date}")
+    logging.info(f"selected_channels: {selected_channels}")
+    logging.info(f"selected_ufs: {selected_ufs}")
+    logging.info(f"selected_nome_colaborador: {selected_nome_colaborador}")
+    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador)
+
+@st.cache_data
+def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
+    return get_channels_and_ufs(cod_colaborador, start_date, end_date)
+
+@st.cache_data
+def get_colaboradores_cached(start_date, end_date, selected_channels, selected_ufs):
+    return get_colaboradores(start_date, end_date, selected_channels, selected_ufs)
+
+@st.cache_data
+def get_rfm_summary_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+    logging.info(f"Chamando get_rfm_summary_cached com os seguintes parâmetros:")
+    logging.info(f"cod_colaborador: {cod_colaborador}")
+    logging.info(f"start_date: {start_date}")
+    logging.info(f"end_date: {end_date}")
+    logging.info(f"selected_channels: {selected_channels}")
+    logging.info(f"selected_ufs: {selected_ufs}")
+    logging.info(f"selected_colaboradores: {selected_colaboradores}")
+    return get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
+
+@st.cache_data
+def get_rfm_heatmap_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+    return get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
 
 def query_athena(query):
     try:
@@ -559,7 +604,6 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
         logging.error(f"Erro ao executar a query: {str(e)}")
         raise
 
-@st.cache_data
 def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
     colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'" if cod_colaborador else ""
     if selected_colaboradores:
@@ -608,47 +652,71 @@ def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channel
     return query_athena(query)
 
 def create_rfm_heatmap_from_aggregated(df):
-    # Criar uma matriz 13x13 preenchida com zeros (removendo a frequência 0)
-    heatmap_data = np.zeros((13, 13))
-    
-    # Preencher a matriz com os dados
-    for _, row in df.iterrows():
-        recency = int(row['Recencia'])
-        frequency = int(row['Frequencia'])
-        if frequency > 0:  # Ignorar frequência 0
-            heatmap_data[recency, frequency - 1] = row['Quantidade']
-    
-    # Criar o mapa de calor
-    fig = go.Figure(data=go.Heatmap(
-        z=heatmap_data,
-        x=list(range(1, 14)),  # Começar de 1
-        y=list(range(13)),
-        colorscale='YlOrRd',
-        hovertemplate='Recência: %{y}<br>Frequência: %{x}<br>Número de Clientes: %{z:.0f}<extra></extra>'
-    ))
+    if df is None or df.empty:
+        st.warning("Não há dados disponíveis para criar o mapa de calor RFM.")
+        return None
 
-    # Adicionar anotações com o número de clientes em cada célula
-    for i in range(13):
-        for j in range(13):
-            value = heatmap_data[i, j]
-            if value > 0:
-                text_color = 'black' if value < np.max(heatmap_data) / 2 else 'white'
-                fig.add_annotation(
-                    x=j+1, y=i,
-                    text=f"{int(value)}",
-                    showarrow=False,
-                    font=dict(color=text_color)
-                )
+    # Verificar se as colunas necessárias existem
+    required_columns = ['Recencia', 'Frequencia', 'Quantidade']
+    if not all(col in df.columns for col in required_columns):
+        st.error(f"Colunas necessárias não encontradas. Colunas esperadas: {required_columns}")
+        st.error(f"Colunas presentes: {df.columns.tolist()}")
+        return None
 
-    fig.update_layout(
-        title='Matriz RFM',
-        xaxis_title='Frequência',
-        yaxis_title='Recência',
-        xaxis=dict(tickmode='array', tickvals=list(range(1, 14)), ticktext=[str(i) for i in range(1, 14)]),
-        yaxis=dict(tickmode='array', tickvals=list(range(13)), ticktext=[str(i) for i in range(13)])
-    )
+    try:
+        # Converter para tipos numéricos, se necessário
+        df['Recencia'] = pd.to_numeric(df['Recencia'], errors='coerce')
+        df['Frequencia'] = pd.to_numeric(df['Frequencia'], errors='coerce')
+        df['Quantidade'] = pd.to_numeric(df['Quantidade'], errors='coerce')
 
-    return fig
+        # Remover linhas com valores NaN
+        df = df.dropna()
+
+        # Criar uma matriz 13x13 preenchida com zeros
+        heatmap_data = np.zeros((13, 13))
+
+        # Preencher a matriz com os dados
+        for _, row in df.iterrows():
+            recency = int(row['Recencia'])
+            frequency = int(row['Frequencia'])
+            if 0 <= recency < 13 and 1 <= frequency <= 13:
+                heatmap_data[recency, frequency - 1] = row['Quantidade']
+
+        # Criar o mapa de calor
+        fig = go.Figure(data=go.Heatmap(
+            z=heatmap_data,
+            x=list(range(1, 14)),
+            y=list(range(13)),
+            colorscale='YlOrRd',
+            hovertemplate='Recência: %{y}<br>Frequência: %{x}<br>Número de Clientes: %{z:.0f}<extra></extra>'
+        ))
+
+        # Adicionar anotações com o número de clientes em cada célula
+        for i in range(13):
+            for j in range(13):
+                value = heatmap_data[i, j]
+                if value > 0:
+                    text_color = 'black' if value < np.max(heatmap_data) / 2 else 'white'
+                    fig.add_annotation(
+                        x=j+1, y=i,
+                        text=f"{int(value)}",
+                        showarrow=False,
+                        font=dict(color=text_color)
+                    )
+
+        fig.update_layout(
+            title='Matriz RFM',
+            xaxis_title='Frequência',
+            yaxis_title='Recência',
+            xaxis=dict(tickmode='array', tickvals=list(range(1, 14)), ticktext=[str(i) for i in range(1, 14)]),
+            yaxis=dict(tickmode='array', tickvals=list(range(13)), ticktext=[str(i) for i in range(13)])
+        )
+
+        return fig
+
+    except Exception as e:
+        st.error(f"Erro ao criar o mapa de calor RFM: {str(e)}")
+        return None
 
 def get_channels_and_ufs(cod_colaborador, start_date, end_date):
 
@@ -697,7 +765,6 @@ def get_colaboradores(start_date, end_date, selected_channels=None, selected_ufs
     
     return query_athena(query)
 
-@st.cache_data
 def get_client_status(start_date, end_date, cod_colaborador, selected_channels, selected_ufs, selected_colaboradores):
     colaborador_filter = ""
     if cod_colaborador:
@@ -971,20 +1038,23 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
     
     return df
 
-@st.cache_data
-def get_rfm_summary_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+
     return get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
 
 def create_client_status_chart(df):
+    logging.info(f"Entering create_client_status_chart with DataFrame shape: {df.shape}")
+    
     if df.empty:
-        st.warning("Não há dados disponíveis para o gráfico de status do cliente.")
+        logging.warning("DataFrame is empty")
         return None, None
 
     # Pivot the dataframe
     df_pivot = df.pivot(index='mes', columns='status', values='qtd').fillna(0)
-    
+    logging.info(f"Pivoted DataFrame shape: {df_pivot.shape}")
+    logging.info(f"Pivoted DataFrame columns: {df_pivot.columns}")
+
     if 'Base' not in df_pivot.columns:
-        st.warning("Coluna 'Base' não encontrada nos dados. O gráfico pode estar incompleto.")
+        logging.warning("Column 'Base' not found in pivoted data")
         return None, None
 
     # Separate Base from other statuses
@@ -993,59 +1063,43 @@ def create_client_status_chart(df):
 
     # Create the stacked bar chart for percentages
     fig_percentages = go.Figure()
-
-    colors = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A']
-    for i, col in enumerate(df_percentages.columns):
-        fig_percentages.add_trace(
-            go.Bar(
-                x=df_percentages.index, 
-                y=df_percentages[col], 
-                name=col,
-                marker_color=colors[i % len(colors)],
-                text=[f"{p:.1f}% ({v:.0f})" for p, v in zip(df_percentages[col], df_pivot[col])],
-                textposition='inside',
-            )
-        )
+    for column in df_percentages.columns:
+        fig_percentages.add_trace(go.Bar(
+            x=df_percentages.index,
+            y=df_percentages[column],
+            name=column,
+            text=df_percentages[column].apply(lambda x: f'{x:.1f}%'),
+            textposition='inside'
+        ))
 
     fig_percentages.update_layout(
-        title='Evolução dos Status dos Clientes (Percentual)',
-        xaxis_title='Mês',
-        yaxis_title='Percentual (%)',
+        title='Percentual de Status dos Clientes',
         barmode='stack',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        hovermode="x unified"
+        yaxis_title='Percentual',
+        xaxis_title='Mês',
+        legend_title='Status',
+        hovermode='x unified'
     )
 
     # Create the line chart for Base
     fig_base = go.Figure()
-
-    fig_base.add_trace(
-        go.Scatter(
-            x=base.index, 
-            y=base, 
-            mode='lines+markers+text',
-            name='Base Total',
-            line=dict(color='#1F77B4', width=3),
-            marker=dict(size=10, color='#1F77B4'),
-            text=[f"{v:,.0f}" for v in base],  # Formatando os números com separadores de milhar
-            textposition='top center',
-            textfont=dict(size=12),
-        )
-    )
+    fig_base.add_trace(go.Scatter(
+        x=base.index, 
+        y=base, 
+        mode='lines+markers+text',
+        name='Base Total',
+        text=[f"{v:,.0f}" for v in base],
+        textposition='top center'
+    ))
 
     fig_base.update_layout(
         title='Evolução da Base Total de Clientes',
         xaxis_title='Mês',
-        yaxis=dict(visible=False),  # Remove o eixo y
-        showlegend=False,  # Remove a legenda
-        hovermode="x unified",
-        plot_bgcolor='white',  # Fundo branco
-        margin=dict(t=50, b=50, l=20, r=20),  # Ajusta as margens
+        yaxis_title='Número de Clientes',
+        hovermode='x unified'
     )
 
-    # Adiciona linhas de grade verticais suaves
-    fig_base.update_xaxes(showgrid=True, gridcolor='lightgrey', gridwidth=0.5)
-
+    logging.info("Finished creating charts")
     return fig_percentages, fig_base
 
 def create_new_rfm_heatmap(df):
@@ -1109,5 +1163,38 @@ def create_new_rfm_heatmap(df):
         st.error(f"Erro ao criar o mapa de calor RFM: {str(e)}")
         return None
 
-# Adicione esta função à lista __all__ se você estiver usando
-__all__.append('create_new_rfm_heatmap')
+def debug_heatmap_data(df):
+    st.write("Primeiras linhas dos dados do mapa de calor:")
+    st.write(df.head())
+    st.write("Informações sobre os dados:")
+    st.write(df.info())
+    st.write("Estatísticas descritivas:")
+    st.write(df.describe())
+
+def debug_rfm_summary(df):
+    st.write("Resumo dos dados RFM:")
+    st.write(f"Número de linhas: {len(df)}")
+    st.write("Colunas presentes:")
+    st.write(df.columns.tolist())
+    st.write("Primeiras linhas dos dados:")
+    st.write(df.head())
+    st.write("Informações sobre os dados:")
+    st.write(df.info())
+    st.write("Estatísticas descritivas:")
+    st.write(df.describe())
+
+def debug_brand_data(df):
+    st.write("Resumo dos dados de marca:")
+    st.write(f"Número de linhas: {len(df)}")
+    st.write("Colunas presentes:")
+    st.write(df.columns.tolist())
+    st.write("Primeiras linhas dos dados:")
+    st.write(df.head())
+    st.write("Informações sobre os dados:")
+    st.write(df.info())
+    st.write("Estatísticas descritivas:")
+    st.write(df.describe())
+
+def clear_cache():
+    st.cache_data.clear()
+
