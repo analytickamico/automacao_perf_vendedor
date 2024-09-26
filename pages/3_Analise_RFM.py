@@ -5,7 +5,9 @@ import plotly.graph_objects as go
 from utils import get_channels_and_ufs, get_colaboradores, get_rfm_summary, get_rfm_heatmap_data, get_rfm_summary_cached, create_rfm_heatmap_from_aggregated
 import traceback
 from PIL import Image
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from session_state import init_session_state, update_filters
 init_session_state()
 
