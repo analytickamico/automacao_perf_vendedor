@@ -7,7 +7,10 @@ import time
 from PIL import Image
 import sys
 import os
+import logging
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from session_state_manager import init_session_state, load_page_specific_state
 from utils import (
     get_monthly_revenue, 
     get_brand_data, 
@@ -17,9 +20,11 @@ from utils import (
     create_client_status_chart
 )
 
+logging.basicConfig(level=logging.INFO)
+
 @st.cache_data
 def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador):
-    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands,selected_nome_colaborador)
+    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador)
 
 @st.cache_data
 def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador):
@@ -33,15 +38,109 @@ def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
 def get_colaboradores_cached(start_date, end_date, selected_channels, selected_ufs):
     return get_colaboradores(start_date, end_date, selected_channels, selected_ufs)
 
-def create_dashboard(df, brand_data, client_status_data, cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_colaboradores, show_additional_info):
+def load_filters():
+    st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state['cod_colaborador'])
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state['start_date'])
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state['end_date'])
+
+    channels, ufs = get_channels_and_ufs_cached(st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'])
+    
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state['selected_channels'])
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state['selected_ufs'])
+
+    if not st.session_state['cod_colaborador']:
+        colaboradores_df = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
+        available_colaboradores = colaboradores_df['nome_colaborador'].tolist()
+        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state['selected_colaboradores'])
+    else:
+        st.session_state['selected_colaboradores'] = []
+
+    st.session_state['data_needs_update'] = True
+    st.session_state['show_additional_info'] = st.sidebar.checkbox("Mostrar informações adicionais", False)
+    st.session_state['show_additional_info'] = st.sidebar.checkbox(
+        "Mostrar informações adicionais",
+        value=st.session_state.get('show_additional_info', False),
+        key="show_additional_info_checkbox"
+    )
+
+
+def load_data():
+    if st.session_state['data_needs_update']:
+        progress_text = "Operação em andamento. Aguarde..."
+        my_bar = st.progress(0, text=progress_text)
+
+        try:
+            my_bar.progress(10, text="Carregando dados de receita mensal...")
+            st.session_state['df'] = get_monthly_revenue_cached(
+                st.session_state['cod_colaborador'],
+                st.session_state['start_date'],
+                st.session_state['end_date'],
+                st.session_state['selected_channels'],
+                st.session_state['selected_ufs'],
+                st.session_state['selected_brands'],
+                st.session_state['selected_colaboradores']
+            )
+
+            my_bar.progress(40, text="Carregando dados de marca...")
+            logging.info("Iniciando carregamento de brand_data")
+            st.session_state['brand_data'] = get_brand_data_cached(
+                st.session_state['cod_colaborador'],
+                st.session_state['start_date'],
+                st.session_state['end_date'],
+                st.session_state['selected_channels'],
+                st.session_state['selected_ufs'],
+                st.session_state['selected_colaboradores']
+            )
+            logging.info(f"brand_data carregado. Tipo: {type(st.session_state['brand_data'])}")
+            if isinstance(st.session_state['brand_data'], pd.DataFrame):
+                logging.info(f"Shape de brand_data: {st.session_state['brand_data'].shape}")
+                logging.info(f"Colunas de brand_data: {st.session_state['brand_data'].columns.tolist()}")
+            else:
+                logging.warning("brand_data não é um DataFrame")
+
+            my_bar.progress(70, text="Carregando dados de status do cliente...")
+            st.session_state['client_status_data'] = get_client_status(
+                start_date=st.session_state['start_date'].strftime('%Y-%m-%d'),
+                end_date=st.session_state['end_date'].strftime('%Y-%m-%d'),
+                cod_colaborador=st.session_state['cod_colaborador'],
+                selected_channels=st.session_state['selected_channels'],
+                selected_ufs=st.session_state['selected_ufs'],
+                selected_colaboradores=st.session_state['selected_colaboradores']
+            )
+
+            my_bar.progress(100, text="Carregamento concluído!")
+            time.sleep(1)
+            my_bar.empty()
+
+            st.session_state['data_needs_update'] = False
+
+        except Exception as e:
+            my_bar.empty()
+            st.error(f"Erro ao carregar dados: {str(e)}")
+            st.error("Por favor, verifique se os filtros aplicados são compatíveis com o código do colaborador selecionado.")
+            logging.error(f"Erro ao carregar dados: {str(e)}")
+
+def create_dashboard():
+    df = st.session_state.get('df')
+    brand_data = st.session_state.get('brand_data')
+    client_status_data = st.session_state.get('client_status_data')
+    cod_colaborador = st.session_state.get('cod_colaborador')
+    start_date = st.session_state.get('start_date')
+    end_date = st.session_state.get('end_date')
+    selected_channels = st.session_state.get('selected_channels')
+    selected_ufs = st.session_state.get('selected_ufs')
+    selected_brands = st.session_state.get('selected_brands')
+    selected_colaboradores = st.session_state.get('selected_colaboradores')
+    show_additional_info = st.session_state.get('show_additional_info', False)
+
+    if df is None or df.empty:
+        st.warning("Não há dados para o período e/ou filtros selecionados.")
+        return
+
     if cod_colaborador:
         st.title(f'Dashboard de Vendas - Colaborador {cod_colaborador}')
     else:
         st.title('Dashboard de Vendas 📈')
-    
-    if df.empty:
-        st.warning("Não há dados para o período e/ou filtros selecionados.")
-        return
 
     # Aplicar filtro de marcas ao DataFrame principal
     if selected_brands and 'marca' in df.columns:
@@ -146,7 +245,7 @@ def create_dashboard(df, brand_data, client_status_data, cod_colaborador, start_
     st.divider()
 
     # Dados por marca
-    if not brand_data.empty and 'marca' in brand_data.columns:
+    if brand_data is not None and not brand_data.empty and 'marca' in brand_data.columns:
         st.write("Dados por marca:")
         
         # Aplicar filtro de marcas selecionadas
@@ -184,7 +283,6 @@ def create_dashboard(df, brand_data, client_status_data, cod_colaborador, start_
         st.warning("Não há dados por marca disponíveis para o período e/ou filtros selecionados.")
 
     # Adicionar o gráfico de status do cliente
-    
     st.subheader("Status dos Clientes")
     if client_status_data is not None and not client_status_data.empty:
         fig_percentages, fig_base = create_client_status_chart(client_status_data)
@@ -201,194 +299,34 @@ def create_dashboard(df, brand_data, client_status_data, cod_colaborador, start_
     else:
         st.warning("Não há dados disponíveis para os gráficos de status do cliente.")
 
-
     if show_additional_info:
         with st.expander("Informações Adicionais"):
             st.dataframe(df)
 
 def main():
-    try:
-        st.set_page_config(page_title="Dashboard de Vendas", layout="wide", )
+    init_session_state()
+    load_page_specific_state("Performance_Vendedor")
 
-        # Inicialização do estado da sessão
-        if 'initialized' not in st.session_state:
-            st.session_state['initialized'] = True
-            st.session_state['cod_colaborador'] = ""
-            st.session_state['start_date'] = date(2024, 1, 1)
-            st.session_state['end_date'] = date.today()
-            st.session_state['selected_channels'] = []
-            st.session_state['selected_ufs'] = []
-            st.session_state['selected_colaboradores'] = []
-            st.session_state['selected_brands'] = []
-            st.session_state['data_needs_update'] = True
-            st.session_state['client_status_data'] = None
+    try:
+        st.set_page_config(page_title="Dashboard de Vendas", layout="wide")
 
         st.sidebar.title('Configurações do Dashboard')
         
-        # Código do Colaborador
-        new_cod_colaborador = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state['cod_colaborador'])
-        if new_cod_colaborador != st.session_state['cod_colaborador']:
-            st.session_state['cod_colaborador'] = new_cod_colaborador
-            st.session_state['data_needs_update'] = True
+        load_filters()
+        load_data()
 
-        # Datas
-        new_start_date = st.sidebar.date_input("Data Inicial", st.session_state['start_date'])
-        new_end_date = st.sidebar.date_input("Data Final", st.session_state['end_date'])
-        if new_start_date != st.session_state['start_date'] or new_end_date != st.session_state['end_date']:
-            st.session_state['start_date'] = new_start_date
-            st.session_state['end_date'] = new_end_date
-            st.session_state['data_needs_update'] = True
+        # Marcas (mova isso para dentro de load_filters() se preferir)
+        brand_data = st.session_state.get('brand_data', pd.DataFrame())
+        available_brands = brand_data['marca'].unique().tolist() if brand_data is not None and 'marca' in brand_data.columns and not brand_data.empty else []
+        st.session_state['selected_brands'] = st.sidebar.multiselect("Selecione as marcas (deixe vazio para todas)", options=available_brands, default=st.session_state['selected_brands'])
 
-        # Atualizar canais e UFs
-        channels, ufs = get_channels_and_ufs_cached(st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'])
-        
-        # Canais de Venda
-        new_selected_channels = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state['selected_channels'])
-        if new_selected_channels != st.session_state['selected_channels']:
-            st.session_state['selected_channels'] = new_selected_channels
-            st.session_state['data_needs_update'] = True
+        #show_additional_info = st.sidebar.checkbox("Mostrar informações adicionais", False)
 
-        # UFs
-        new_selected_ufs = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state['selected_ufs'])
-        if new_selected_ufs != st.session_state['selected_ufs']:
-            st.session_state['selected_ufs'] = new_selected_ufs
-            st.session_state['data_needs_update'] = True
-
-        # Colaboradores
-        if not st.session_state['cod_colaborador']:
-            colaboradores_df = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
-            available_colaboradores = colaboradores_df['nome_colaborador'].tolist()
-            new_selected_colaboradores = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state['selected_colaboradores'])
-            if new_selected_colaboradores != st.session_state['selected_colaboradores']:
-                st.session_state['selected_colaboradores'] = new_selected_colaboradores
-                st.session_state['data_needs_update'] = True
-        else:
-            st.session_state['selected_colaboradores'] = []
-
-        # Carregar ou recarregar dados se necessário
-        if st.session_state['data_needs_update']:
-            progress_text = "Operação em andamento. Aguarde..."
-            my_bar = st.progress(0, text=progress_text)
-
-            try:
-                # Carregando dados de receita mensal
-                my_bar.progress(10, text="Carregando dados de receita mensal...")
-                st.session_state['df'] = get_monthly_revenue_cached(
-                    st.session_state['cod_colaborador'],
-                    st.session_state['start_date'],
-                    st.session_state['end_date'],
-                    st.session_state['selected_channels'],
-                    st.session_state['selected_ufs'],
-                    st.session_state['selected_brands'],
-                    st.session_state['selected_colaboradores']
-                )
-
-                # Carregando dados de marca
-                my_bar.progress(40, text="Carregando dados de marca...")
-                st.session_state['brand_data'] = get_brand_data_cached(
-                    st.session_state['cod_colaborador'],
-                    st.session_state['start_date'],
-                    st.session_state['end_date'],
-                    st.session_state['selected_channels'],
-                    st.session_state['selected_ufs'],
-                    st.session_state['selected_colaboradores']
-                )
-
-                # Carregando dados de status do cliente
-                my_bar.progress(70, text="Carregando dados de status do cliente...")
-                st.session_state['client_status_data'] = get_client_status(
-                    start_date=st.session_state['start_date'].strftime('%Y-%m-%d'),
-                    end_date=st.session_state['end_date'].strftime('%Y-%m-%d'),
-                    cod_colaborador=st.session_state['cod_colaborador'],
-                    selected_channels=st.session_state['selected_channels'],
-                    selected_ufs=st.session_state['selected_ufs'],
-                    selected_colaboradores=st.session_state['selected_colaboradores']
-                )
-
-                my_bar.progress(100, text="Carregamento concluído!")
-                time.sleep(1)  # Pausa breve para que o usuário veja a conclusão
-                my_bar.empty()  # Remove a barra de progresso
-
-            except Exception as e:
-                my_bar.empty()  # Remove a barra de progresso em caso de erro
-                st.error(f"Erro ao carregar dados: {str(e)}")
-                st.error("Por favor, verifique se os filtros aplicados são compatíveis com o código do colaborador selecionado.")
-                return
-
-            st.session_state['data_needs_update'] = False
-
-        df = st.session_state['df']
-        brand_data = st.session_state['brand_data']
-        client_status_data = st.session_state['client_status_data']
-        
-        # Marcas
-        available_brands = brand_data['marca'].unique().tolist() if not brand_data.empty else []
-        new_selected_brands = st.sidebar.multiselect("Selecione as marcas (deixe vazio para todas)", options=available_brands, default=st.session_state['selected_brands'])
-        if new_selected_brands != st.session_state['selected_brands']:
-            st.session_state['selected_brands'] = new_selected_brands
-            st.session_state['data_needs_update'] = True
-
-        show_additional_info = st.sidebar.checkbox("Mostrar informações adicionais", False)
-        
-        if st.session_state['data_needs_update']:
-            with st.spinner('Atualizando dados...'):
-                try:
-                    st.session_state['df'] = get_monthly_revenue_cached(
-                        st.session_state['cod_colaborador'],
-                        st.session_state['start_date'],
-                        st.session_state['end_date'],
-                        st.session_state['selected_channels'],
-                        st.session_state['selected_ufs'],
-                        st.session_state['selected_brands'],
-                        st.session_state['selected_colaboradores']
-                    )
-                    st.session_state['brand_data'] = get_brand_data_cached(
-                        st.session_state['cod_colaborador'],
-                        st.session_state['start_date'],
-                        st.session_state['end_date'],
-                        st.session_state['selected_channels'],
-                        st.session_state['selected_ufs'],
-                        st.session_state['selected_colaboradores']
-                    )
-                    # Atualizar dados de status do cliente
-                    st.session_state['client_status_data'] = get_client_status(
-                        start_date=st.session_state['start_date'].strftime('%Y-%m-%d'),
-                        end_date=st.session_state['end_date'].strftime('%Y-%m-%d'),
-                        cod_colaborador=st.session_state['cod_colaborador'],
-                        selected_channels=st.session_state['selected_channels'],
-                        selected_ufs=st.session_state['selected_ufs'],
-                        selected_colaboradores=st.session_state['selected_colaboradores']
-                )
-
-                except Exception as e:
-                    st.error(f"Erro ao carregar dados: {str(e)}")
-                    st.error("Por favor, verifique se os filtros aplicados são compatíveis com o código do colaborador selecionado.")
-                    return
-
-            st.session_state['data_needs_update'] = False
-        
-        df = st.session_state['df']
-        brand_data = st.session_state['brand_data']
-        client_status_data = st.session_state['client_status_data']
-
-        create_dashboard(
-            df, 
-            brand_data, 
-            client_status_data,
-            st.session_state['cod_colaborador'], 
-            st.session_state['start_date'], 
-            st.session_state['end_date'], 
-            st.session_state['selected_channels'], 
-            st.session_state['selected_ufs'], 
-            st.session_state['selected_brands'], 
-            st.session_state['selected_colaboradores'], 
-            show_additional_info
-        )
+        create_dashboard()
 
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o dashboard: {str(e)}")
-        st.write("Detalhes do erro:")
-        st.write(e)
+        logging.error(f"Erro ao carregar o dashboard: {str(e)}")
         st.write("Por favor, verifique se todos os dados necessários foram carregados corretamente na página inicial.")
 
 if __name__ == "__main__":

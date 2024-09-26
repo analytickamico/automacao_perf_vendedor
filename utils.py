@@ -72,6 +72,10 @@ def get_rfm_summary_cached(cod_colaborador, start_date, end_date, selected_chann
 def get_rfm_heatmap_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
     return get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
 
+@st.cache_data
+def get_rfm_segment_clients_cached(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs, selected_colaboradores):
+    return get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs, selected_colaboradores)
+
 def query_athena(query):
     try:
         logging.info("Iniciando conexão com Athena")
@@ -279,6 +283,10 @@ SELECT
     return df
 
 def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador):
+    logging.info("Iniciando get_brand_data")
+    logging.info(f"Parâmetros: cod_colaborador={cod_colaborador}, start_date={start_date}, end_date={end_date}")
+    logging.info(f"selected_channels={selected_channels}, selected_ufs={selected_ufs}, selected_nome_colaborador={selected_nome_colaborador}")
+
     try:
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'" if cod_colaborador else ""
 
