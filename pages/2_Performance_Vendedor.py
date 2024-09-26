@@ -232,19 +232,19 @@ def main():
         st.set_page_config(page_title="Dashboard de Vendas", layout="wide", page_icon= icon)
 
         # Inicialização do estado da sessão
-        if 'initialized' not in st.session_state:
-            st.session_state['initialized'] = True
-            st.session_state['cod_colaborador'] = ""
-            st.session_state['start_date'] = date(2024, 1, 1)
-            st.session_state['end_date'] = date.today()
-            st.session_state['selected_channels'] = []
-            st.session_state['selected_ufs'] = []
-            st.session_state['selected_colaboradores'] = []
-            st.session_state['selected_brands'] = []
-            st.session_state['data_needs_update'] = True
-            st.session_state['df'] = pd.DataFrame()  # Inicialize com um DataFrame vazio
-            st.session_state['brand_data'] = pd.DataFrame()  # Inicialize com um DataFrame vazio
-            st.session_state['client_status_data'] = None
+        #if 'initialized' not in st.session_state:
+        #    st.session_state['initialized'] = True
+        #    st.session_state['cod_colaborador'] = ""
+        #   st.session_state['start_date'] = date(2024, 1, 1)
+        #    st.session_state['end_date'] = date.today()
+        #    st.session_state['selected_channels'] = []
+        #    st.session_state['selected_ufs'] = []
+        #    st.session_state['selected_colaboradores'] = []
+        #    st.session_state['selected_brands'] = []
+        #    st.session_state['data_needs_update'] = True
+        #    st.session_state['df'] = pd.DataFrame()  # Inicialize com um DataFrame vazio
+        #    st.session_state['brand_data'] = pd.DataFrame()  # Inicialize com um DataFrame vazio
+        #    st.session_state['client_status_data'] = None
 
         st.sidebar.title('Configurações do Dashboard')
         
