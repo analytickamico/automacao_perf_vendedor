@@ -4,6 +4,11 @@ from datetime import date
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
+from PIL import Image
+import os
+from session_state import init_session_state, update_filters
+init_session_state()
+
 from utils import (
     get_monthly_revenue, 
     get_brand_data, 
@@ -12,6 +17,14 @@ from utils import (
     get_client_status,
     create_client_status_chart
 )
+
+current_dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(current_dir)
+ico_path = os.path.join(parent_dir, "favicon.ico")
+
+icon = Image.open(ico_path) 
+
+
 
 @st.cache_data
 def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador):
@@ -79,9 +92,9 @@ def create_dashboard(df, brand_data, client_status_data, cod_colaborador, start_
         st.metric("Bonificação", f"R$ {latest_data['valor_bonificacao']:,.2f}")
         st.markdown(f"<p style='font-size: medium; color: green;'>({bonificacao_percentual:.2f}% do faturamento líquido)</p>", unsafe_allow_html=True)
     with col4:
-        st.metric("Clientes Únicos", f"{latest_data['positivacao']:,}")
+        st.metric("Clientes Únicos", f"{latest_data['positivacao']:,.0f}")
     with col5:
-        st.metric("Pedidos", f"{latest_data['qtd_pedido']:,}")
+        st.metric("Pedidos", f"{latest_data['qtd_pedido']:,.0f}")
      
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:        
@@ -183,19 +196,38 @@ def create_dashboard(df, brand_data, client_status_data, cod_colaborador, start_
     
     st.subheader("Status dos Clientes")
     if client_status_data is not None and not client_status_data.empty:
-        client_status_chart = create_client_status_chart(client_status_data)
-        if client_status_chart:
-            st.plotly_chart(client_status_chart, use_container_width=True)
+        fig_percentages, fig_base = create_client_status_chart(client_status_data)
+        if fig_percentages and fig_base:
+            st.plotly_chart(fig_percentages, use_container_width=True)
+            st.plotly_chart(fig_base, use_container_width=True, height=400)  # Ajustando a altura do gráfico de linha
+        else:
+            st.warning("Não foi possível gerar os gráficos de status do cliente.")
     else:
-        st.warning("Não há dados disponíveis para o gráfico de status do cliente.")
+        st.warning("Não há dados disponíveis para os gráficos de status do cliente.")
 
     if show_additional_info:
         with st.expander("Informações Adicionais"):
             st.dataframe(df)
 
+def manage_filters():    
+    st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador", value=st.session_state['cod_colaborador'], on_change=update_filters)
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", value=st.session_state['start_date'], on_change=update_filters)
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", value=st.session_state['end_date'], on_change=update_filters)
+    
+    channels, ufs = get_channels_and_ufs(st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'])
+    
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state['selected_channels'], on_change=update_filters)
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state['selected_ufs'], on_change=update_filters)
+    
+    colaboradores = get_colaboradores(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
+    colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
+    st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state['selected_colaboradores'], on_change=update_filters)  
+
+
 def main():
+    manage_filters()
     try:
-        st.set_page_config(page_title="Dashboard de Vendas", layout="wide", )
+        st.set_page_config(page_title="Dashboard de Vendas", layout="wide", page_icon= icon)
 
         # Inicialização do estado da sessão
         if 'initialized' not in st.session_state:
@@ -208,6 +240,8 @@ def main():
             st.session_state['selected_colaboradores'] = []
             st.session_state['selected_brands'] = []
             st.session_state['data_needs_update'] = True
+            st.session_state['df'] = pd.DataFrame()  # Inicialize com um DataFrame vazio
+            st.session_state['brand_data'] = pd.DataFrame()  # Inicialize com um DataFrame vazio
             st.session_state['client_status_data'] = None
 
         st.sidebar.title('Configurações do Dashboard')
@@ -304,7 +338,20 @@ def main():
 
             st.session_state['data_needs_update'] = False
 
-        df = st.session_state['df']
+        if 'df' in st.session_state and not st.session_state['df'].empty:
+            df = st.session_state['df']
+        else:
+            # Carregar os dados novamente se não estiverem disponíveis
+            df = get_monthly_revenue_cached(
+                st.session_state['cod_colaborador'],
+                st.session_state['start_date'],
+                st.session_state['end_date'],
+                st.session_state['selected_channels'],
+                st.session_state['selected_ufs'],
+                st.session_state['selected_brands'],
+                st.session_state['selected_colaboradores']
+            )
+            st.session_state['df'] = df
         brand_data = st.session_state['brand_data']
         client_status_data = st.session_state['client_status_data']
         

@@ -1,9 +1,20 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from utils import get_channels_and_ufs, get_monthly_revenue, get_brand_data, get_rfm_summary, create_rfm_heatmap, get_colaboradores,get_client_status
+from utils import (
+    get_channels_and_ufs,
+    get_monthly_revenue,
+    get_brand_data,
+    get_rfm_summary,
+    get_colaboradores,
+    get_client_status,
+    create_new_rfm_heatmap  # Substituímos create_rfm_heatmap por create_new_rfm_heatmap
+)
+from PIL import Image
 
-st.set_page_config(page_title="Dashboard de Vendas", layout="wide")
+icon = Image.open("favicon.ico") 
+
+st.set_page_config(page_title="Dashboard de Vendas", layout="wide", page_icon= icon)
 
 @st.cache_data
 def load_initial_data():

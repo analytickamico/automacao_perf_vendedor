@@ -343,8 +343,14 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
         logging.error(f"Erro ao obter dados de marca: {str(e)}", exc_info=True)
         return pd.DataFrame()
     
-def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs):
-    colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'" if cod_colaborador else ""
+def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+    # Adicione a lógica para filtrar por selected_colaboradores
+    colaborador_filter = ""
+    if cod_colaborador:
+        colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_colaboradores:
+        colaboradores_str = "', '".join(selected_colaboradores)
+        colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
     
     channel_filter = ""
     if selected_channels:
@@ -418,9 +424,9 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
         COUNT(*) AS Numero_Clientes,
         SUM(Monetario) AS Valor_Total,
         AVG(Monetario) AS Valor_Medio,
-        AVG(R_Score) AS R_Score_Medio,
-        AVG(F_Score) AS F_Score_Medio,
-        AVG(M_Score) AS M_Score_Medio
+        AVG(Recencia) AS Recencia_Media,
+        AVG(Frequencia) Positivacoes_Media,
+        AVG(M_Score) AS Health_Score_Medio
     FROM
         rfm_segments
     GROUP BY
@@ -428,10 +434,26 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
     ORDER BY
         Valor_Total DESC, Canal_Venda;
     """
+    logging.info(f"Executando query para dados de marca: {query}")
     return query_athena(query)
 
-def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs):
-    colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'" if cod_colaborador else ""
+def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs, selected_colaboradores):
+    logging.info(f"Iniciando get_rfm_segment_clients com os seguintes parâmetros:")
+    logging.info(f"cod_colaborador: {cod_colaborador}")
+    logging.info(f"start_date: {start_date}")
+    logging.info(f"end_date: {end_date}")
+    logging.info(f"segment: {segment}")
+    logging.info(f"selected_channels: {selected_channels}")
+    logging.info(f"selected_ufs: {selected_ufs}")
+    logging.info(f"selected_colaboradores: {selected_colaboradores}")
+
+    colaborador_filter = ""
+    if cod_colaborador:
+        colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_colaboradores:
+        colaboradores_str = "', '".join(selected_colaboradores)
+        colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
+
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
 
@@ -512,75 +534,121 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
     FROM
         rfm_segments
     WHERE
-        Segmento = '{segment}'
+        Segmento = '{segment}' OR '{segment}' = 'Todos'
     ORDER BY
         Monetario DESC, Canal_Venda;
     """
+    
+    logging.info(f"Query construída:")
+    logging.info(query)
+    
+    try:
+        logging.info("Executando query no Athena...")
+        result = query_athena(query)
+        logging.info(f"Query executada com sucesso. Tipo do resultado: {type(result)}")
+        logging.info(f"Número de linhas no resultado: {len(result)}")
+        
+        if result.empty:
+            logging.warning("O resultado da query é um DataFrame vazio.")
+        else:
+            logging.info(f"Colunas do DataFrame: {result.columns.tolist()}")
+            logging.info(f"Primeiras linhas do DataFrame:\n{result.head().to_string()}")
+        
+        return result
+    except Exception as e:
+        logging.error(f"Erro ao executar a query: {str(e)}")
+        raise
+
+@st.cache_data
+def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+    colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'" if cod_colaborador else ""
+    if selected_colaboradores:
+        colaboradores_str = "', '".join(selected_colaboradores)
+        colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
+
+    channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
+    uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
+
+    query = f"""
+    WITH rfm_base AS (
+        SELECT
+            a.Recencia,
+            a.Positivacao AS Frequencia
+        FROM
+            databeautykami.vw_analise_perfil_cliente a
+        LEFT JOIN
+            databeautykami.vw_distribuicao_cliente_vendedor b ON a.Cod_Cliente = b.cod_cliente
+        WHERE 1 = 1 
+        {colaborador_filter}
+        {channel_filter}
+        {uf_filter}
+    ),
+    rfm_scores AS (
+        SELECT
+            LEAST(FLOOR(Recencia), 12) AS R_Score,
+            LEAST(FLOOR(Frequencia), 13) AS F_Score
+        FROM
+            rfm_base
+    )
+    SELECT
+        R_Score AS Recencia,
+        F_Score AS Frequencia,
+        COUNT(*) AS Quantidade
+    FROM
+        rfm_scores
+    GROUP BY
+        R_Score, F_Score
+    ORDER BY
+        R_Score, F_Score
+    """
+    
+    return query_athena(query)
+    # Log para depuração
+    print(f"Query executada: {query}")
     return query_athena(query)
 
-def create_rfm_heatmap(rfm_summary):
-    #st.write("Dados do RFM Summary:")
-    #st.write(rfm_summary)
+def create_rfm_heatmap_from_aggregated(df):
+    # Criar uma matriz 13x13 preenchida com zeros (removendo a frequência 0)
+    heatmap_data = np.zeros((13, 13))
+    
+    # Preencher a matriz com os dados
+    for _, row in df.iterrows():
+        recency = int(row['Recencia'])
+        frequency = int(row['Frequencia'])
+        if frequency > 0:  # Ignorar frequência 0
+            heatmap_data[recency, frequency - 1] = row['Quantidade']
+    
+    # Criar o mapa de calor
+    fig = go.Figure(data=go.Heatmap(
+        z=heatmap_data,
+        x=list(range(1, 14)),  # Começar de 1
+        y=list(range(13)),
+        colorscale='YlOrRd',
+        hovertemplate='Recência: %{y}<br>Frequência: %{x}<br>Número de Clientes: %{z:.0f}<extra></extra>'
+    ))
 
-    # Verificar se as colunas necessárias existem
-    required_columns = ['R_Score_Medio', 'F_Score_Medio', 'Numero_Clientes']
-    missing_columns = [col for col in required_columns if col not in rfm_summary.columns]
-    if missing_columns:
-        st.error(f"Colunas ausentes no DataFrame: {', '.join(missing_columns)}")
-        return None
+    # Adicionar anotações com o número de clientes em cada célula
+    for i in range(13):
+        for j in range(13):
+            value = heatmap_data[i, j]
+            if value > 0:
+                text_color = 'black' if value < np.max(heatmap_data) / 2 else 'white'
+                fig.add_annotation(
+                    x=j+1, y=i,
+                    text=f"{int(value)}",
+                    showarrow=False,
+                    font=dict(color=text_color)
+                )
 
-    # Criando a matriz de contagem
-    heatmap_data = pd.DataFrame(index=range(1, 6), columns=range(1, 6))
-    heatmap_data = heatmap_data.fillna(0)
+    fig.update_layout(
+        title='Matriz RFM',
+        xaxis_title='Frequência',
+        yaxis_title='Recência',
+        xaxis=dict(tickmode='array', tickvals=list(range(1, 14)), ticktext=[str(i) for i in range(1, 14)]),
+        yaxis=dict(tickmode='array', tickvals=list(range(13)), ticktext=[str(i) for i in range(13)])
+    )
 
-    try:
-        for _, row in rfm_summary.iterrows():
-            r_score = int(round(row['R_Score_Medio']))
-            f_score = int(round(row['F_Score_Medio']))
-            num_clients = row['Numero_Clientes']
-            
-            # Garantir que os scores estão dentro do intervalo 1-5
-            r_score = max(1, min(5, r_score))
-            f_score = max(1, min(5, f_score))
-            
-            heatmap_data.at[r_score, f_score] += num_clients
-
-        #st.write("Mapa de calor gerado:")
-        #st.write(heatmap_data)
-
-        # Criando o mapa de calor
-        fig = go.Figure(data=go.Heatmap(
-            z=heatmap_data.values,
-            x=heatmap_data.columns,
-            y=heatmap_data.index,
-            colorscale='YlOrRd',
-            hovertemplate='Recência: %{y}<br>Frequência: %{x}<br>Número de Clientes: %{z:.0f}<extra></extra>'
-        ))
-
-        # Adicionando o texto com o número de clientes em cada célula
-        for i, row in heatmap_data.iterrows():
-            for j, value in row.items():
-                if value > 0:
-                    fig.add_annotation(
-                        x=j,
-                        y=i,
-                        text=str(int(value)),
-                        showarrow=False,
-                        font=dict(color="black" if value < heatmap_data.values.max()/2 else "white")
-                    )
-
-        fig.update_layout(
-            title='Matriz RFM',
-            xaxis_title='Frequência',
-            yaxis_title='Recência',
-            xaxis=dict(tickmode='array', tickvals=list(range(1, 6)), ticktext=[str(i) for i in range(1, 6)]),
-            yaxis=dict(tickmode='array', tickvals=list(range(1, 6)), ticktext=[str(i) for i in range(1, 6)])
-        )
-
-        return fig
-    except Exception as e:
-        st.error(f"Erro ao criar o mapa de calor: {str(e)}")
-        return None   
+    return fig
 
 def get_channels_and_ufs(cod_colaborador, start_date, end_date):
 
@@ -903,66 +971,143 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
     
     return df
 
+@st.cache_data
+def get_rfm_summary_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+    return get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
+
 def create_client_status_chart(df):
     if df.empty:
         st.warning("Não há dados disponíveis para o gráfico de status do cliente.")
-        return None
+        return None, None
 
     # Pivot the dataframe
     df_pivot = df.pivot(index='mes', columns='status', values='qtd').fillna(0)
     
-    # Ensure 'Base' column exists
     if 'Base' not in df_pivot.columns:
         st.warning("Coluna 'Base' não encontrada nos dados. O gráfico pode estar incompleto.")
-        return None
+        return None, None
 
-    # Calculate percentages
+    # Separate Base from other statuses
     base = df_pivot['Base']
     df_percentages = df_pivot.drop(columns=['Base']).div(base, axis=0) * 100
 
-    # Create the stacked bar chart
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    # Create the stacked bar chart for percentages
+    fig_percentages = go.Figure()
 
-    # Add stacked bars for percentages
     colors = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A']
     for i, col in enumerate(df_percentages.columns):
-        fig.add_trace(
+        fig_percentages.add_trace(
             go.Bar(
                 x=df_percentages.index, 
                 y=df_percentages[col], 
                 name=col,
                 marker_color=colors[i % len(colors)],
-                text=df_percentages[col].apply(lambda x: f'{x:.1f}%'),
+                text=[f"{p:.1f}% ({v:.0f})" for p, v in zip(df_percentages[col], df_pivot[col])],
                 textposition='inside',
-            ),
-            secondary_y=False,
+            )
         )
 
-    # Add bar for the base
-    fig.add_trace(
-        go.Bar(
-            x=df_pivot.index, 
-            y=df_pivot['Base'], 
-            name='Base Total',
-            marker_color='rgba(0,0,0,0.2)',
-            text=df_pivot['Base'].apply(lambda x: f'{x:,.0f}'),
-            textposition='outside',
-        ),
-        secondary_y=True,
-    )
-
-    # Update layout
-    fig.update_layout(
-        title='Evolução do Status dos Clientes',
+    fig_percentages.update_layout(
+        title='Evolução dos Status dos Clientes (Percentual)',
         xaxis_title='Mês',
         yaxis_title='Percentual (%)',
-        yaxis2_title='Base Total',
-        barmode='relative',
+        barmode='stack',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         hovermode="x unified"
     )
 
-    fig.update_yaxes(range=[0, 100], secondary_y=False)
-    fig.update_yaxes(title_text="Base Total", secondary_y=True)
+    # Create the line chart for Base
+    fig_base = go.Figure()
 
-    return fig
+    fig_base.add_trace(
+        go.Scatter(
+            x=base.index, 
+            y=base, 
+            mode='lines+markers+text',
+            name='Base Total',
+            line=dict(color='#1F77B4', width=3),
+            marker=dict(size=10, color='#1F77B4'),
+            text=[f"{v:,.0f}" for v in base],  # Formatando os números com separadores de milhar
+            textposition='top center',
+            textfont=dict(size=12),
+        )
+    )
+
+    fig_base.update_layout(
+        title='Evolução da Base Total de Clientes',
+        xaxis_title='Mês',
+        yaxis=dict(visible=False),  # Remove o eixo y
+        showlegend=False,  # Remove a legenda
+        hovermode="x unified",
+        plot_bgcolor='white',  # Fundo branco
+        margin=dict(t=50, b=50, l=20, r=20),  # Ajusta as margens
+    )
+
+    # Adiciona linhas de grade verticais suaves
+    fig_base.update_xaxes(showgrid=True, gridcolor='lightgrey', gridwidth=0.5)
+
+    return fig_percentages, fig_base
+
+def create_new_rfm_heatmap(df):
+    if df.empty:
+        st.warning("Não há dados disponíveis para o mapa de calor RFM.")
+        return None
+
+    # Verificar se as colunas necessárias existem
+    required_columns = ['Recencia', 'Frequencia']
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        st.error(f"Colunas ausentes no DataFrame: {', '.join(missing_columns)}")
+        return None
+
+    # Criando a matriz de contagem
+    heatmap_data = pd.DataFrame(index=range(0, 13), columns=range(1, 14))
+    heatmap_data = heatmap_data.fillna(0)
+
+    try:
+        for _, row in df.iterrows():
+            r_score = int(row['Recencia'])
+            f_score = int(row['Frequencia'])
+            
+            # Garantir que os scores estão dentro do intervalo
+            r_score = max(0, min(12, r_score))
+            f_score = max(1, min(13, f_score))
+            
+            heatmap_data.at[r_score, f_score] += 1
+
+        # Criando o mapa de calor
+        fig = go.Figure(data=go.Heatmap(
+            z=heatmap_data.values,
+            x=heatmap_data.columns,
+            y=heatmap_data.index,
+            colorscale='YlOrRd',
+            hovertemplate='Recência: %{y}<br>Frequência: %{x}<br>Número de Clientes: %{z:.0f}<extra></extra>'
+        ))
+
+        # Adicionando o texto com o número de clientes em cada célula
+        for i, row in heatmap_data.iterrows():
+            for j, value in row.items():
+                if value > 0:
+                    fig.add_annotation(
+                        x=j,
+                        y=i,
+                        text=str(int(value)),
+                        showarrow=False,
+                        font=dict(color="black" if value < heatmap_data.values.max()/2 else "white")
+                    )
+
+        fig.update_layout(
+            title='Matriz RFM',
+            xaxis_title='Frequência',
+            yaxis_title='Recência',
+            xaxis=dict(tickmode='array', tickvals=list(range(1, 14)), ticktext=[str(i) for i in range(1, 14)]),
+            yaxis=dict(tickmode='array', tickvals=list(range(0, 13)), ticktext=[str(i) for i in range(0, 13)])
+        )
+
+        return fig
+    except Exception as e:
+        st.error(f"Erro ao criar o mapa de calor RFM: {str(e)}")
+        return None
+
+# Adicione esta função à lista __all__ se você estiver usando
+__all__.append('create_new_rfm_heatmap')
