@@ -2,3 +2,4 @@ node_modules/
 *.log
 .env
 automacao_vend/lib/
+__pycache__/
