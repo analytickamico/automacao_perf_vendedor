@@ -2,6 +2,14 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import plotly.graph_objects as go
+import traceback
+from PIL import Image
+import sys
+import os
+import logging
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from session_state_manager import init_session_state, load_page_specific_state
 from utils import (
     get_channels_and_ufs,
     get_colaboradores,
@@ -11,27 +19,8 @@ from utils import (
     create_rfm_heatmap_from_aggregated,
     get_rfm_segment_clients_cached
 )
-import traceback
-from PIL import Image
-import sys
-import os
-import logging
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from session_state_manager import init_session_state, load_page_specific_state
-
-def main():
-    init_session_state()
-    load_page_specific_state("Performance_Vendedor")  # ou "Analise_RFM" para a outra página
-    
-    # Resto do código da página...
-
-if __name__ == "__main__":
-    main()
 
 logging.basicConfig(level=logging.INFO)
-
-init_session_state()
 
 current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
@@ -61,11 +50,11 @@ def manage_filters():
     st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state['selected_colaboradores'], on_change=update_filters)
 
 def load_filters():
-    manage_filters()  # Sua função existente para gerenciar filtros
-    
-    # Debug: Mostrar filtros selecionados
+    manage_filters()
     st.sidebar.write("Filtros aplicados:", st.session_state)
+
 def load_data():
+    logging.info("Iniciando carregamento de dados")
     if st.session_state['data_needs_update']:
         with st.spinner('Carregando dados...'):
             try:
@@ -90,8 +79,10 @@ def load_data():
                 st.error(f"Erro ao carregar dados: {str(e)}")
                 logging.error(f"Erro ao carregar dados: {str(e)}")
                 logging.error(traceback.format_exc())
+    logging.info("Finalizado carregamento de dados")
 
 def create_dashboard():
+    logging.info("Iniciando criação do dashboard")
     if 'rfm_summary' in st.session_state and 'heatmap_data' in st.session_state:
         create_dashboard_content(
             st.session_state['rfm_summary'],
@@ -121,13 +112,9 @@ def create_dashboard_content(rfm_summary, heatmap_data):
             'Health_Score_Medio': '{:.2f}'
         }))
 
-        # Lista de segmentos RFM
         segmentos_rfm = ['Todos'] + rfm_summary['Segmento'].unique().tolist()
-        
-        # Radio buttons para seleção do segmento
         segmento_selecionado = st.radio("Selecione um segmento RFM para ver os clientes:", segmentos_rfm)
 
-        # Análise de Clientes por Segmento RFM
         st.subheader("Análise de Clientes por Segmento RFM")
         
         if segmento_selecionado != 'Todos':
@@ -145,11 +132,9 @@ def create_dashboard_content(rfm_summary, heatmap_data):
                 if not clientes_segmento.empty:
                     st.write(f"Clientes do segmento: {segmento_selecionado}")
                     
-                    # Formatando as colunas numéricas
                     clientes_segmento['Monetario'] = clientes_segmento['Monetario'].apply(lambda x: f"R$ {x:,.2f}")
                     clientes_segmento['ticket_medio_posit'] = clientes_segmento['ticket_medio_posit'].apply(lambda x: f"R$ {x:,.2f}")
                     
-                    # Exibindo a tabela de clientes
                     st.dataframe(clientes_segmento[['Cod_Cliente', 'Nome_Cliente', 'Recencia', 'Frequencia', 'Monetario', 'ticket_medio_posit', 'Mes_Ultima_Compra']])
                     
                     st.write(f"Total de clientes no segmento: {len(clientes_segmento)}")
@@ -159,6 +144,7 @@ def create_dashboard_content(rfm_summary, heatmap_data):
             st.info("Selecione um segmento específico para ver os detalhes dos clientes.")
     else:
         st.warning("Não há dados de segmentos RFM disponíveis.")
+    logging.info("Finalizado criação do dashboard")
 
 def main():
     init_session_state()
@@ -170,3 +156,6 @@ def main():
     load_filters()
     load_data()
     create_dashboard()
+
+if __name__ == "__main__":
+    main()
