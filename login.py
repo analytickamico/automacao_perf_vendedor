@@ -1,6 +1,7 @@
 # login.py
 import streamlit as st
 import pandas as pd
+from session_state_manager import reset_session_state
 
 # Dados dos usuários (hard-coded)
 users = pd.DataFrame({
@@ -31,3 +32,4 @@ def login():
 def logout():
     st.session_state['logged_in'] = False
     st.session_state['user'] = None
+    reset_session_state()

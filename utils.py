@@ -664,6 +664,8 @@ def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channel
             # Apenas aplique o filtro de nome se não houver um código de colaborador
             nome_str = "', '".join(selected_colaboradores)
             colaborador_filter = f"AND b.nome_colaborador_atual IN ('{nome_str}')"
+    else:
+        colaborador_filter = ""
 
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
