@@ -195,6 +195,8 @@ def load_filters_admin_gestor():
     st.session_state['data_needs_update'] = True
 
 def main():
+    st.set_page_config(page_title="Análise Clientes", page_icon=icon, layout="wide")
+
     if 'logged_in' not in st.session_state or not st.session_state['logged_in']:
         st.warning("Por favor, faça login na página inicial para acessar esta página.")
         return
@@ -202,8 +204,7 @@ def main():
     init_session_state()
     load_page_specific_state("Analise_RFM")
 
-    try:
-        st.set_page_config(page_title="Análise Clientes", page_icon=icon, layout="wide")
+    try:        
         
         st.sidebar.title('Configurações do Dashboard')
 

@@ -451,12 +451,11 @@ def load_data_for_vendedor(cod_colaborador):
             logging.error(f"Erro ao carregar dados para o vendedor: {str(e)}", exc_info=True)
 
 def main():
+    st.set_page_config(page_title="Dashboard de Vendas", layout="wide", page_icon=ico_path)
     init_session_state()
     load_page_specific_state("Performance_Vendedor")
 
     try:
-        st.set_page_config(page_title="Dashboard de Vendas", layout="wide", page_icon=ico_path)
-
         st.sidebar.title('Configurações do Dashboard')
         
         if st.session_state['user']['role'] == 'vendedor':
