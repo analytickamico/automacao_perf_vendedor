@@ -11,6 +11,7 @@ from pyathena.pandas.util import as_pandas
 import os
 
 
+
 __all__ = [
     'get_monthly_revenue_cached', 'get_brand_data_cached', 'get_channels_and_ufs_cached',
     'get_colaboradores_cached', 'get_rfm_summary_cached', 'get_rfm_heatmap_data_cached',
@@ -120,11 +121,18 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
         uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{ufs_str}')"
     
     # Filtro e colunas adicionais para colaborador específico
-    if cod_colaborador:
-        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+    if cod_colaborador or selected_nome_colaborador:
+        colaborador_filter = ""
+        if cod_colaborador:
+            colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+        elif selected_nome_colaborador:
+            # Apenas aplique o filtro de nome se não houver um código de colaborador
+            nome_str = "', '".join(selected_nome_colaborador)
+            colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+    
         group_by_cols = "1, 2, 3, fator"
         group_by_cols_acum = "1, 2, 3"
-        
+    
         select_cols_subquery = """
         empresa_pedido.nome_colaborador_atual vendedor,
         empresa_pedido.cod_colaborador_atual cod_colaborador,
@@ -136,8 +144,16 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
         select_cols_main = """
         f.vendedor,
         f.cod_colaborador,
-        """
-    nome_filter = ""
+    """
+    else:
+        colaborador_filter = ""
+        group_by_cols = "1, fator"
+        group_by_cols_acum = "1"
+        select_cols_subquery = ""
+        select_cols_subquery_alias = ""
+        select_cols_main = ""
+        nome_filter = ""
+
     if selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
         nome_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
@@ -172,8 +188,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
                 {colaborador_filter}
                 {channel_filter}
                 {uf_filter}
-                {brand_filter}
-                {nome_filter}
+                {brand_filter}  
             GROUP BY {group_by_cols}
         )   boni 
     group by {group_by_cols_acum}
@@ -270,17 +285,43 @@ SELECT
         {channel_filter}
         {uf_filter}
         {brand_filter}
-        {nome_filter}
     group by {group_by_cols_acum}
     ) f
-    LEFT JOIN bonificacao b ON f.mes_ref = b.mes_ref {' AND f.cod_colaborador = b.cod_colaborador' if cod_colaborador else ''}
-    ORDER BY f.mes_ref{', f.vendedor' if cod_colaborador else ''}
+    LEFT JOIN bonificacao b ON f.mes_ref = b.mes_ref 
+        {' AND f.cod_colaborador = b.cod_colaborador' if cod_colaborador or selected_nome_colaborador else ''}
+    ORDER BY f.mes_ref{', f.vendedor' if cod_colaborador or selected_nome_colaborador else ''}
     """
     
     logging.info(f"Query executada: {query}")
+    logging.info(f"Parâmetros de entrada:")
+    logging.info(f"cod_colaborador: {cod_colaborador}")
+    logging.info(f"start_date: {start_date}")
+    logging.info(f"end_date: {end_date}")
+    logging.info(f"selected_channels: {selected_channels}")
+    logging.info(f"selected_ufs: {selected_ufs}")
+    logging.info(f"selected_brands: {selected_brands}")
+    logging.info(f"selected_nome_colaborador: {selected_nome_colaborador}")
+
+    logging.info(f"Filtros aplicados:")
+    logging.info(f"colaborador_filter: {colaborador_filter}")
+    logging.info(f"channel_filter: {channel_filter}")
+    logging.info(f"uf_filter: {uf_filter}")
+    logging.info(f"brand_filter: {brand_filter}")
+
+    logging.info(f"Filtro de colaborador aplicado: {colaborador_filter}")
+    logging.info(f"Código do colaborador: {cod_colaborador}")
+    logging.info(f"Nome do colaborador selecionado: {selected_nome_colaborador}")
     
     df = query_athena(query)
-    return df
+    if df is not None:
+        logging.info(f"DataFrame resultante: shape={df.shape}, colunas={df.columns.tolist()}")
+        if not df.empty:
+            logging.info(f"Primeiras linhas:\n{df.head()}")
+        else:
+            logging.warning("DataFrame está vazio após a query")
+    else:
+        logging.warning("Query retornou None")
+    return df if df is not None else pd.DataFrame()
 
 def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador):
     logging.info("Iniciando get_brand_data")
@@ -394,7 +435,7 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
         return df
     except Exception as e:
         logging.error(f"Erro ao obter dados de marca: {str(e)}", exc_info=True)
-        return pd.DataFrame()
+        return df if df is not None else pd.DataFrame()
     
 def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
     # Adicione a lógica para filtrar por selected_colaboradores
@@ -409,7 +450,7 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
     if selected_channels:
         channels_str = "', '".join(selected_channels)
         channel_filter = f"AND a.Canal_Venda IN ('{channels_str}')"
-    
+
     uf_filter = ""
     if selected_ufs:
         ufs_str = "', '".join(selected_ufs)
@@ -458,15 +499,16 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
     rfm_segments AS (
         SELECT
             *,
-            CASE
-                WHEN R_Score = 5 AND F_Score = 5  THEN 'Campeões'
-                WHEN R_Score >= 4 AND F_Score >= 4  THEN 'Clientes fiéis'
-                WHEN R_Score = 5 AND F_Score <= 2 THEN 'Novos clientes'
-                WHEN R_Score <= 2 AND F_Score <= 3 THEN 'Em risco'
-                WHEN R_Score = 1 AND F_Score = 1 THEN 'Perdidos'
-                WHEN R_Score = 3 AND F_Score = 1  THEN 'Atenção'
-                ELSE 'Outros'
-            END AS Segmento
+                CASE
+                    WHEN R_Score = 5 AND F_Score >= 4 AND M_Score >= 4 THEN 'Campeões'
+                    WHEN R_Score >= 4 AND F_Score >= 4 THEN 'Clientes fiéis'
+                    WHEN R_Score = 5 AND F_Score <= 2 THEN 'Novos clientes'
+                    WHEN R_Score = 1 THEN 'Perdidos'
+                    WHEN R_Score <= 3 AND F_Score = 1 THEN 'Atenção'
+                    WHEN R_Score <= 3 AND F_Score BETWEEN 2 and 3 THEN 'Em risco'                 
+                    WHEN R_Score >= 3 AND F_Score >= 3 AND M_Score >= 3 THEN 'Potencial'
+                    ELSE 'Acompanhar'
+                END AS Segmento
         FROM
             rfm_scores
     )
@@ -518,7 +560,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
             a.uf_empresa,
             a.Canal_Venda,
             a.Recencia,
-            a.Positivacao AS Frequencia,
+            a.Positivacao,
             a.Monetario,
             a.ticket_medio_posit,
             b.cod_colaborador_atual,
@@ -544,10 +586,10 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
                 ELSE 1
             END AS R_Score,
             CASE
-                WHEN Frequencia >= 10 THEN 5
-                WHEN Frequencia BETWEEN 7 AND 9 THEN 4
-                WHEN Frequencia BETWEEN 3 AND 6 THEN 3
-                WHEN Frequencia BETWEEN 2 AND 2 THEN 2
+                WHEN Positivacao >= 10 THEN 5
+                WHEN Positivacao BETWEEN 7 AND 9 THEN 4
+                WHEN Positivacao BETWEEN 3 AND 6 THEN 3
+                WHEN Positivacao BETWEEN 2 AND 2 THEN 2
                 ELSE 1
             END AS F_Score,
             NTILE(5) OVER (ORDER BY Monetario DESC) AS M_Score
@@ -557,15 +599,16 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
     rfm_segments AS (
         SELECT
             *,
-            CASE
-                WHEN R_Score = 5 AND F_Score = 5  THEN 'Campeões'
-                WHEN R_Score >= 3 AND F_Score >= 3  THEN 'Clientes fiéis'
-                WHEN R_Score = 5 AND F_Score <= 2 THEN 'Novos clientes'
-                WHEN R_Score <= 2 AND F_Score <= 3 THEN 'Em risco'
-                WHEN R_Score = 1 AND F_Score = 1 THEN 'Perdidos'
-                WHEN R_Score = 3 AND F_Score = 1  THEN 'Atenção'
-                ELSE 'Outros'
-            END AS Segmento
+                CASE
+                    WHEN R_Score = 5 AND F_Score >= 4 AND M_Score >= 4 THEN 'Campeões'
+                    WHEN R_Score >= 4 AND F_Score >= 4 THEN 'Clientes fiéis'
+                    WHEN R_Score = 5 AND F_Score <= 2 THEN 'Novos clientes'
+                    WHEN R_Score = 1 THEN 'Perdidos'
+                    WHEN R_Score <= 3 AND F_Score = 1 THEN 'Atenção'
+                    WHEN R_Score <= 3 AND F_Score BETWEEN 2 and 3 THEN 'Em risco'                 
+                    WHEN R_Score >= 3 AND F_Score >= 3 AND M_Score >= 3 THEN 'Potencial'
+                    ELSE 'Acompanhar'
+                END AS Segmento
         FROM
             rfm_scores
     )
@@ -575,7 +618,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
         uf_empresa,
         Canal_Venda,
         Recencia,
-        Frequencia,
+        Positivacao,
         Monetario,
         ticket_medio_posit,
         R_Score,
@@ -613,10 +656,14 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
         raise
 
 def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
-    colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'" if cod_colaborador else ""
-    if selected_colaboradores:
-        colaboradores_str = "', '".join(selected_colaboradores)
-        colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
+    if cod_colaborador or selected_colaboradores:
+        colaborador_filter = ""
+        if cod_colaborador:
+            colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'"
+        elif selected_colaboradores:
+            # Apenas aplique o filtro de nome se não houver um código de colaborador
+            nome_str = "', '".join(selected_colaboradores)
+            colaborador_filter = f"AND b.nome_colaborador_atual IN ('{nome_str}')"
 
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
@@ -709,15 +756,35 @@ def create_rfm_heatmap_from_aggregated(df):
                         x=j+1, y=i,
                         text=f"{int(value)}",
                         showarrow=False,
-                        font=dict(color=text_color)
+                        font=dict(color=text_color, size=12)  # Fonte ainda menor
                     )
 
         fig.update_layout(
-            title='Matriz RFM',
-            xaxis_title='Frequência',
+            title={
+                'text': 'Matriz Recencia vs Positivacao',
+                'y':0.95,
+                'x':0.5,
+                'xanchor': 'center',
+                'yanchor': 'top'
+            },
+            xaxis_title='Frequência (Positivacao)',
             yaxis_title='Recência',
-            xaxis=dict(tickmode='array', tickvals=list(range(1, 14)), ticktext=[str(i) for i in range(1, 14)]),
-            yaxis=dict(tickmode='array', tickvals=list(range(13)), ticktext=[str(i) for i in range(13)])
+            xaxis=dict(
+                tickmode='array', 
+                tickvals=list(range(1, 14)), 
+                ticktext=[str(i) for i in range(1, 14)],
+                tickfont=dict(size=12)
+            ),
+            yaxis=dict(
+                tickmode='array', 
+                tickvals=list(range(13)), 
+                ticktext=[str(i) for i in range(13)],
+                tickfont=dict(size=12)
+            ),
+            width=800,  # Largura reduzida
+            #height=500,  # Altura reduzida
+            margin=dict(l=40, r=20, t=40, b=20),  # Margens ajustadas
+            font=dict(size=12)  # Tamanho da fonte geral
         )
 
         return fig
@@ -725,6 +792,7 @@ def create_rfm_heatmap_from_aggregated(df):
     except Exception as e:
         st.error(f"Erro ao criar o mapa de calor RFM: {str(e)}")
         return None
+
 
 def get_channels_and_ufs(cod_colaborador, start_date, end_date):
 
@@ -773,18 +841,23 @@ def get_colaboradores(start_date, end_date, selected_channels=None, selected_ufs
     
     return query_athena(query)
 
-def get_client_status(start_date, end_date, cod_colaborador, selected_channels, selected_ufs, selected_colaboradores):
+def get_client_status(start_date, end_date, cod_colaborador, selected_channels, selected_ufs, selected_nome_colaborador, selected_brands):
     colaborador_filter = ""
     if cod_colaborador:
         colaborador_filter = "AND vw_distribuicao_empresa_pedido.cod_colaborador_atual = '{}'".format(cod_colaborador)
-    elif selected_colaboradores:
-        colaboradores_str = "', '".join(selected_colaboradores)
+    elif selected_nome_colaborador:
+        colaboradores_str = "', '".join(selected_nome_colaborador)
         colaborador_filter = "AND vw_distribuicao_empresa_pedido.nome_colaborador_atual IN ('{}')".format(colaboradores_str)
     
     channel_filter = ""
     if selected_channels:
         channels_str = "', '".join(selected_channels)
         channel_filter = "AND vw_distribuicao_pedidos.canal_venda IN ('{}')".format(channels_str)
+
+    brand_filter = ""
+    if selected_brands:
+        brand_str = "', '".join(selected_brands)
+        brand_filter = "AND vw_distribuicao_item_pedidos.marca IN ('{}')".format(brand_str)
     
     uf_filter = ""
     if selected_ufs:
@@ -829,6 +902,7 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
             {channel_filter}
             {uf_filter}
             {colaborador_filter}
+            {brand_filter}
     ),
         PrimeirasCompras AS (
             SELECT
@@ -1031,7 +1105,8 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
         end_date=end_date,
         channel_filter=channel_filter,
         uf_filter=uf_filter,
-        colaborador_filter=colaborador_filter
+        colaborador_filter=colaborador_filter,
+        brand_filter=brand_filter
     )
 
     logging.info(f"Executing query for client status: {query}")
@@ -1044,7 +1119,7 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
         logging.info(f"Columns: {df.columns}")
         logging.info(f"First few rows:\n{df.head()}")
     
-    return df
+    return df if df is not None else pd.DataFrame()
 
 
     return get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
@@ -1076,12 +1151,12 @@ def create_client_status_chart(df):
             x=df_percentages.index,
             y=df_percentages[column],
             name=column,
-            text=df_percentages[column].apply(lambda x: f'{x:.1f}%'),
+            text=[f'{p:.1f}% ({v:,.0f})' for p, v in zip(df_percentages[column], df_pivot[column])],
             textposition='inside'
         ))
 
     fig_percentages.update_layout(
-        title='Percentual de Status dos Clientes',
+        title='Percentual e Qtd de Status dos Clientes',
         barmode='stack',
         yaxis_title='Percentual',
         xaxis_title='Mês',

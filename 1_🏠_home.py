@@ -11,6 +11,7 @@ from utils import (
     create_new_rfm_heatmap  # Substituímos create_rfm_heatmap por create_new_rfm_heatmap
 )
 from PIL import Image
+from login import login, logout
 
 icon = Image.open("favicon.ico") 
 
@@ -34,6 +35,11 @@ def load_initial_data():
     return start_date, end_date
 
 def initialize_session_state():
+    if 'logged_in' not in st.session_state:
+        st.session_state['logged_in'] = False
+    if 'user' not in st.session_state:
+        st.session_state['user'] = None
+
     if 'start_date' not in st.session_state:
         st.session_state['start_date'] = date(2024, 1, 1)
     if 'end_date' not in st.session_state:
@@ -52,11 +58,15 @@ def initialize_session_state():
 def main():
     initialize_session_state()
 
-    st.title('Dashboard de Vendas - Home')
-    st.write("Bem-vindo ao Dashboard de Vendas!")
-    st.write("Use o menu lateral para navegar entre as diferentes análises.")
+    if not st.session_state['logged_in']:
+        login()
+    else:
+        st.sidebar.title(f"Bem-vindo, {st.session_state['user']['username']}!")
+        st.sidebar.button("Logout", on_click=logout)
 
-    # Aqui você pode adicionar algumas métricas gerais ou gráficos de visão geral
+        st.title('Dashboard de Vendas - Home')
+        st.write("Bem-vindo ao Dashboard de Vendas!")
+        st.write("Use o menu lateral para navegar entre as diferentes análises.")
 
 if __name__ == "__main__":
     main()

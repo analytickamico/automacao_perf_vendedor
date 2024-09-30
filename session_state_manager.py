@@ -14,6 +14,7 @@ def reset_session_state():
     st.session_state['selected_ufs'] = []
     st.session_state['selected_colaboradores'] = []
     st.session_state['selected_brands'] = []
+    st.session_state['selected_nome_colaborador'] = ""  # Inicialização do 'selected_nome_colaborador'
     st.session_state['data_needs_update'] = True
     st.session_state['client_status_data'] = None
     st.session_state['df'] = None
