@@ -6,18 +6,18 @@ textColor = "#262730"
 font = "sans serif"
 
 [server]
-enableCORS = false
-enableXsrfProtection = false
+enableCORS = true
+enableXsrfProtection = true
 
 [browser]
-gatherUsageStats = false
-
-[client]
-toolbarMode = "minimal"
-showErrorDetails = false
-
-[logger]
-level = "warning"
+serverAddress = "localhost"
+serverPort = 8501
 
 [runner]
 magicEnabled = true
+
+[client]
+showErrorDetails = true
+
+[global]
+developmentMode = false

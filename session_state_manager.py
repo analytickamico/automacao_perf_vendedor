@@ -3,10 +3,13 @@ from datetime import date
 
 def init_session_state():
     if 'initialized' not in st.session_state:
-        st.session_state['initialized'] = True
         reset_session_state()
+    st.session_state['initialized'] = True
+    ensure_cod_colaborador()
 
 def reset_session_state():
+    st.session_state['user'] = None
+    st.session_state['logged_in'] = False
     st.session_state['cod_colaborador'] = ""
     st.session_state['start_date'] = date(2024, 1, 1)
     st.session_state['end_date'] = date.today()
@@ -14,14 +17,22 @@ def reset_session_state():
     st.session_state['selected_ufs'] = []
     st.session_state['selected_colaboradores'] = []
     st.session_state['selected_brands'] = []
-    st.session_state['selected_nome_colaborador'] = ""  # Inicialização do 'selected_nome_colaborador'
     st.session_state['data_needs_update'] = True
     st.session_state['client_status_data'] = None
     st.session_state['df'] = None
     st.session_state['brand_data'] = None
+    st.session_state['current_page'] = None
+    st.session_state['show_additional_info'] = False
 
 def load_page_specific_state(page_name):
     if st.session_state.get('current_page') != page_name:
-        reset_session_state()
         st.session_state['current_page'] = page_name
-        st.session_state['show_additional_info'] = False  # Reinicializa esta variável
+        st.session_state['show_additional_info'] = False
+    ensure_cod_colaborador()
+
+def ensure_cod_colaborador():
+    if st.session_state.get('user') and st.session_state['user'].get('role') == 'vendedor':
+        if not st.session_state.get('cod_colaborador'):
+            st.session_state['cod_colaborador'] = st.session_state['user'].get('cod_colaborador', '')
+    elif 'cod_colaborador' not in st.session_state:
+        st.session_state['cod_colaborador'] = ""

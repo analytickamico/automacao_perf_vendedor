@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 from datetime import date
 from utils import (
     get_channels_and_ufs,
@@ -8,10 +7,12 @@ from utils import (
     get_rfm_summary,
     get_colaboradores,
     get_client_status,
-    create_new_rfm_heatmap  # Substituímos create_rfm_heatmap por create_new_rfm_heatmap
+    create_new_rfm_heatmap
 )
 from PIL import Image
 from login import login, logout
+from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
+
 
 icon = Image.open("favicon.ico") 
 
@@ -22,16 +23,6 @@ def load_initial_data():
     today = date.today()
     start_date = date(2024, 1, 1)
     end_date = today
-
-    #channels, ufs = get_channels_and_ufs(None, start_date, end_date)
-    
-    #df = get_monthly_revenue(None, start_date, end_date, None, None, None, None)
-    #brand_data = get_brand_data(None, start_date, end_date, None, None, None)
-    #rfm_summary = get_rfm_summary(None, start_date, end_date, None, None)
-    #rfm_heatmap = create_rfm_heatmap(rfm_summary)
-    #nome_colaborador = get_colaboradores(start_date, end_date, None, None)
-
-    #return df, brand_data, channels, ufs, start_date, end_date, rfm_summary, rfm_heatmap, nome_colaborador
     return start_date, end_date
 
 def initialize_session_state():
@@ -50,23 +41,56 @@ def initialize_session_state():
         st.session_state['selected_ufs'] = []
     if 'selected_brands' not in st.session_state:
         st.session_state['selected_brands'] = []
+    
+    # Modificação aqui
     if 'cod_colaborador' not in st.session_state:
-        st.session_state['cod_colaborador'] = ""
+        if st.session_state.get('user') and isinstance(st.session_state['user'], dict):
+            st.session_state['cod_colaborador'] = st.session_state['user'].get('cod_colaborador', '')
+        else:
+            st.session_state['cod_colaborador'] = ''
+    
     if 'nome_colaborador' not in st.session_state:
-        st.session_state['nome_colaborador'] = ""
+        if st.session_state.get('user') and isinstance(st.session_state['user'], dict):
+            st.session_state['nome_colaborador'] = st.session_state['user'].get('username', '')
+        else:
+            st.session_state['nome_colaborador'] = ''
+
+def ensure_cod_colaborador():
+    if st.session_state.get('user') and isinstance(st.session_state['user'], dict):
+        if st.session_state['user'].get('role') == 'vendedor':
+            st.session_state['cod_colaborador'] = st.session_state['user'].get('cod_colaborador', '')
+    elif 'cod_colaborador' not in st.session_state:
+        st.session_state['cod_colaborador'] = ''
 
 def main():
-    initialize_session_state()
+    init_session_state()
+        
+    if st.session_state.get('logout_requested', False):
+        st.session_state['logout_requested'] = False
+        st.write("Você foi desconectado. Recarregue a página para continuar.")
+        return
 
-    if not st.session_state['logged_in']:
-        login()
+    load_page_specific_state("Home")
+        
+    if not st.session_state.get('logged_in', False):
+            login()
     else:
-        st.sidebar.title(f"Bem-vindo, {st.session_state['user']['username']}!")
-        st.sidebar.button("Logout", on_click=logout)
+            user = st.session_state.get('user', {})
+            st.sidebar.title(f"Bem-vindo, {user.get('username', 'Usuário')}!")
 
-        st.title('Dashboard de Vendas - Home')
-        st.write("Bem-vindo ao Dashboard de Vendas!")
-        st.write("Use o menu lateral para navegar entre as diferentes análises.")
+            #if user.get('role') == 'vendedor':
+                #st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
+            
+            if st.sidebar.button("Logout"):
+                logout()  # Chamando a função logout finalizada sem rerun
+
+            st.title('Dashboard de Vendas - Home')
+            st.write("Bem-vindo ao Dashboard de Vendas!")
+            st.write("Use o menu lateral para navegar entre as diferentes análises.")
+
+
+        # Aqui você pode adicionar mais conteúdo para a página inicial,
+        # como um resumo dos dados ou links rápidos para as outras páginas
 
 if __name__ == "__main__":
     main()

@@ -10,15 +10,14 @@ import os
 import logging
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from session_state_manager import init_session_state, load_page_specific_state
-from utils import (
-    get_monthly_revenue, 
-    get_brand_data, 
-    get_channels_and_ufs, 
-    get_colaboradores, 
-    get_client_status,
-    create_client_status_chart
-)
+from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
+from utils import get_monthly_revenue
+from utils import get_brand_data
+from utils import get_channels_and_ufs
+from utils import get_colaboradores
+from utils import get_client_status
+from utils import create_client_status_chart
+from utils import get_brand_options
 
 logging.basicConfig(level=logging.INFO)
 
@@ -70,57 +69,36 @@ def apply_filters(df):
     return df
 
 def load_filters():
-    if st.session_state['user']['role'] in ['admin', 'gestor']:
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state['cod_colaborador'])
-        show_all_filters = True
+    ensure_cod_colaborador()
+    user = st.session_state.get('user', {})
+    
+    if user.get('role') in ['admin', 'gestor']:
+        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
+    elif user.get('role') == 'vendedor':
+        st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
     else:
-        st.sidebar.info(f"Vendedor: {st.session_state['user']['username']}")
-        st.sidebar.info(f"Código do Colaborador: {st.session_state['user']['cod_colaborador']}")
-        show_all_filters = False
-        st.session_state['cod_colaborador'] = st.session_state['user']['cod_colaborador']
+        st.warning("Tipo de usuário não reconhecido.")
+        return
 
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state['start_date'])
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state['end_date'])
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date', date.today()))
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date', date.today()))
 
-    if show_all_filters:
-        channels, ufs = get_channels_and_ufs_cached(st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'])
-        
-        st.session_state['selected_channels'] = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state['selected_channels'])
-        st.session_state['selected_ufs'] = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state['selected_ufs'])
+    channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
+    
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state.get('selected_channels', []))
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state.get('selected_ufs', []))
 
-        brand_data = st.session_state.get('brand_data', pd.DataFrame())
-        available_brands = brand_data['marca'].unique().tolist() if brand_data is not None and 'marca' in brand_data.columns and not brand_data.empty else []
-        
-        previous_selected_brands = st.session_state.get('selected_brands', [])
-        st.session_state['selected_brands'] = st.sidebar.multiselect(
-            "Selecione as marcas (deixe vazio para todas)", 
-            options=available_brands, 
-            default=previous_selected_brands
-        )
-        if st.session_state['selected_brands'] != previous_selected_brands:
-            st.session_state['data_needs_update'] = True
+    # Adicionar carga de marcas
+    brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
+    st.session_state['selected_brands'] = st.sidebar.multiselect("Selecione as marcas", options=brand_options, default=st.session_state.get('selected_brands', []))
 
+    if user.get('role') in ['admin', 'gestor']:
         colaboradores_df = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
-        available_colaboradores = colaboradores_df['nome_colaborador'].tolist()
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state['selected_colaboradores'])
-    else:
-        st.session_state['selected_channels'] = []
-        st.session_state['selected_ufs'] = []
-        st.session_state['selected_brands'] = []
-        st.session_state['selected_colaboradores'] = [st.session_state['user']['username']]
-
-    st.session_state['show_additional_info'] = st.sidebar.checkbox("Mostrar informações adicionais", False, key="show_additional_info_checkbox")
+        available_colaboradores = colaboradores_df['nome_colaborador'].tolist() if not colaboradores_df.empty else []
+        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state.get('selected_colaboradores', []))
 
     if st.sidebar.button("Atualizar Dados"):
         st.session_state['data_needs_update'] = True
-
-    # Sempre atualize os dados se as datas mudarem
-    if st.session_state['start_date'] != st.session_state.get('previous_start_date') or \
-       st.session_state['end_date'] != st.session_state.get('previous_end_date'):
-        st.session_state['data_needs_update'] = True
-        st.session_state['previous_start_date'] = st.session_state['start_date']
-        st.session_state['previous_end_date'] = st.session_state['end_date']
-
 
 def load_data():
     if st.session_state['data_needs_update']:
@@ -128,41 +106,39 @@ def load_data():
         my_bar = st.progress(0, text=progress_text)
 
         try:
-            logging.info("load_data: Iniciando carregamento de dados")
-            logging.info(f"load_data: cod_colaborador = {st.session_state['cod_colaborador']}")
-            
             my_bar.progress(10, text="Carregando dados de receita mensal...")
-            df = get_monthly_revenue_cached(
+            
+            if st.session_state['user']['role'] == 'vendedor':
+                selected_colaboradores = st.session_state['cod_colaborador']
+            else:
+                selected_colaboradores = st.session_state['selected_colaboradores']
+            
+            df = get_monthly_revenue(
                 cod_colaborador=st.session_state['cod_colaborador'],
                 start_date=st.session_state['start_date'],
                 end_date=st.session_state['end_date'],
                 selected_channels=st.session_state['selected_channels'],
                 selected_ufs=st.session_state['selected_ufs'],
                 selected_brands=st.session_state['selected_brands'],
-                selected_nome_colaborador=st.session_state['selected_colaboradores']
+                selected_nome_colaborador=selected_colaboradores
             )
-            logging.info(f"load_data: Dados de receita mensal carregados. Shape: {df.shape}")
-            
-            st.session_state['df'] = apply_filters(df)
-            logging.info(f"load_data: Dados filtrados. Shape após filtro: {st.session_state['df'].shape}")
-
-            logging.info("load_data: Carregando dados de marca")
-            logging.info(f"load_data: cod_colaborador = {st.session_state['cod_colaborador']}")
+            st.session_state['df'] = df
 
             my_bar.progress(40, text="Carregando dados de marca...")
-            brand_data = get_brand_data_cached(
+            brand_data = get_brand_data(
                 cod_colaborador=st.session_state['cod_colaborador'],
                 start_date=st.session_state['start_date'],
                 end_date=st.session_state['end_date'],
                 selected_channels=st.session_state['selected_channels'],
                 selected_ufs=st.session_state['selected_ufs'],
-                selected_nome_colaborador=st.session_state['selected_nome_colaborador']
+                selected_nome_colaborador=selected_colaboradores
             )
-            st.session_state['brand_data'] = apply_filters(brand_data)
+            
+            if st.session_state['selected_brands']:
+                brand_data = brand_data[brand_data['marca'].isin(st.session_state['selected_brands'])]
+            
+            st.session_state['brand_data'] = brand_data
 
-            logging.info("load_data: Iniciando carregamento de dados")
-            logging.info(f"load_data: cod_colaborador = {st.session_state['cod_colaborador']}")
-            logging.info(f"load_data: brand_data = {st.session_state['brand_data']}")
             my_bar.progress(70, text="Carregando dados de status do cliente...")
             client_status_data = get_client_status(
                 start_date=st.session_state['start_date'],
@@ -170,20 +146,17 @@ def load_data():
                 cod_colaborador=st.session_state['cod_colaborador'],
                 selected_channels=st.session_state['selected_channels'],
                 selected_ufs=st.session_state['selected_ufs'],
-                selected_nome_colaborador=st.session_state['selected_nome_colaborador'],
+                selected_nome_colaborador=selected_colaboradores,
                 selected_brands=st.session_state['selected_brands']
             )
-            st.session_state['client_status_data'] = apply_filters(client_status_data)
+            st.session_state['client_status_data'] = client_status_data
 
-            logging.info("load_data: Iniciando carregamento de dados")
-            logging.info(f"load_data: cod_colaborador = {st.session_state['cod_colaborador']}")
-            logging.info(f"load_data: cliente_status = {st.session_state['client_status_data']}")
+            my_bar.progress(90, text="Finalizando carregamento...")
+
+            st.session_state['data_needs_update'] = False
             my_bar.progress(100, text="Carregamento concluído!")
             time.sleep(1)
             my_bar.empty()
-
-            st.session_state['data_needs_update'] = False
-            logging.info("load_data: Carregamento de dados concluído")
 
         except Exception as e:
             my_bar.empty()
@@ -193,6 +166,7 @@ def load_data():
 def create_dashboard():
     df = st.session_state.get('df')
     brand_data = st.session_state.get('brand_data')
+
     client_status_data = st.session_state.get('client_status_data')
     cod_colaborador = st.session_state.get('cod_colaborador')
     start_date = st.session_state.get('start_date')
@@ -334,9 +308,9 @@ def create_dashboard():
     if brand_data is not None and not brand_data.empty and 'marca' in brand_data.columns:
         st.write("Dados por marca:")
         
-        # Aplicar filtro de marcas selecionadas
-        if selected_brands:
-            brand_data = brand_data[brand_data['marca'].isin(selected_brands)]
+        # Não aplicar filtro de marcas para vendedores
+        if st.session_state['user']['role'] != 'vendedor' and st.session_state['selected_brands']:
+            brand_data = brand_data[brand_data['marca'].isin(st.session_state['selected_brands'])]
         
         # Calculando o total de faturamento para o share
         total_faturamento = brand_data['faturamento'].sum()
@@ -451,22 +425,36 @@ def load_data_for_vendedor(cod_colaborador):
             logging.error(f"Erro ao carregar dados para o vendedor: {str(e)}", exc_info=True)
 
 def main():
+    init_session_state()  # Use init_session_state em vez de initialize_session_state
+    if st.session_state.get('logout_requested', False):
+        st.session_state['logout_requested'] = False
+        # Adiciona checagem para evitar o rerun imediato
+        if st.session_state.get('logged_in') is None: 
+            st.write("Você foi desconectado. Recarregue a página para continuar.")
+            return
+    
     st.set_page_config(page_title="Dashboard de Vendas", layout="wide", page_icon=ico_path)
-    init_session_state()
     load_page_specific_state("Performance_Vendedor")
+
+    if not st.session_state.get('logged_in', False):
+        st.warning("Por favor, faça login na página inicial para acessar esta página.")
+        return
 
     try:
         st.sidebar.title('Configurações do Dashboard')
         
-        if st.session_state['user']['role'] == 'vendedor':
-            # Para vendedor, carregue os dados imediatamente com o cod_colaborador
-            load_data_for_vendedor(st.session_state['user']['cod_colaborador'])
-        else:
-            # Para admin/gestor, carregue os filtros primeiro
+        user = st.session_state.get('user')
+        if user and isinstance(user, dict) and 'role' in user:
+            if user['role'] == 'vendedor':
+                st.session_state['cod_colaborador'] = user.get('cod_colaborador', '')
+                st.sidebar.info(f"Código do Colaborador: {st.session_state['cod_colaborador']}")
             load_filters()
-            
-            if st.session_state['data_needs_update']:
-                load_data()
+        else:
+            st.warning("Informações de usuário não disponíveis. Por favor, faça login novamente.")
+            return
+
+        if st.session_state.get('data_needs_update', True):
+            load_data()
 
         create_dashboard()
 

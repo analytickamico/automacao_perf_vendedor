@@ -77,6 +77,46 @@ def get_rfm_heatmap_data_cached(cod_colaborador, start_date, end_date, selected_
 def get_rfm_segment_clients_cached(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs, selected_colaboradores):
     return get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs, selected_colaboradores)
 
+@st.cache_data
+def load_filter_options(cod_colaborador, start_date, end_date):
+    channels, ufs = get_channels_and_ufs(cod_colaborador, start_date, end_date)
+    colaboradores = get_colaboradores(start_date, end_date, None, None)
+    colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
+    
+    # Carregar marcas sem filtros iniciais
+    brand_data = get_brand_data(cod_colaborador, start_date, end_date, None, None, None)
+    brand_options = brand_data['marca'].unique().tolist() if 'marca' in brand_data.columns else []
+    
+    return channels, ufs, colaboradores_options, brand_options
+
+# Em utils.py
+
+@st.cache_data
+def get_brand_options(start_date, end_date):
+    try:
+        query = f"""
+        SELECT DISTINCT item_pedidos.marca
+        FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
+        LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+            ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+        WHERE date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+            AND pedidos."desc_abrev_cfop" IN (
+                'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
+                'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
+                'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
+                'Venda de mercadoria sujeita ao regime de substituição tributária',
+                'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
+            )
+        ORDER BY item_pedidos.marca
+        """
+        logging.info(f"Executando query para obter marcas: {query}")
+        df = query_athena(query)
+        logging.info(f"Query executada com sucesso. Número de marcas obtidas: {len(df)}")
+        return df['marca'].tolist() if not df.empty else []
+    except Exception as e:
+        logging.error(f"Erro ao obter opções de marca: {str(e)}")
+        return []
+
 def query_athena(query):
     try:
         logging.info("Iniciando conexão com Athena")
@@ -324,51 +364,40 @@ SELECT
     return df if df is not None else pd.DataFrame()
 
 def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador):
-    logging.info("Iniciando get_brand_data")
-    logging.info(f"Parâmetros: cod_colaborador={cod_colaborador}, start_date={start_date}, end_date={end_date}")
-    logging.info(f"selected_channels={selected_channels}, selected_ufs={selected_ufs}, selected_nome_colaborador={selected_nome_colaborador}")
+    colaborador_filter = ""
+    if isinstance(selected_nome_colaborador, str):  # Para vendedores
+        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{selected_nome_colaborador}'"
+    elif selected_nome_colaborador:  # Para admin/gestor
+        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{', '.join(selected_nome_colaborador)}')"
+    elif cod_colaborador:
+        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
 
-    try:
-        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'" if cod_colaborador else ""
+    channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
+    uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
 
-        channel_filter = ""
-        if selected_channels:
-            channels_str = "', '".join(selected_channels)
-            channel_filter = f"AND pedidos.canal_venda IN ('{channels_str}')"
-        
-        uf_filter = ""
-        if selected_ufs:
-            ufs_str = "', '".join(selected_ufs)
-            uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{ufs_str}')"
-
-        nome_filter = ""
-        if selected_nome_colaborador:
-            nome_str = "', '".join(selected_nome_colaborador)
-            nome_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"            
-        
-        query = f"""
+    query = f"""
+    SELECT
+    item_pedidos.marca,
+    ROUND(SUM(item_pedidos."preco_desconto_rateado"), 2) AS faturamento,
+    COUNT(DISTINCT pedidos.cpfcnpj) AS clientes_unicos,
+    COUNT(DISTINCT pedidos.cod_pedido) AS qtd_pedido,
+    SUM(item_pedidos.qtd) AS qtd_itens,
+    COUNT(DISTINCT item_pedidos.cod_produto) AS qtd_sku,
+    ROUND(SUM(item_pedidos."preco_desconto_rateado") / NULLIF(COUNT(DISTINCT pedidos.cpfcnpj), 0), 2) AS Ticket_Medio_Positivacao,
+    ROUND(SUM(item_pedidos."preco_desconto_rateado") / NULLIF(COUNT(DISTINCT pedidos.cod_pedido), 0), 2) AS Ticket_Medio_Pedidos,
+    CASE 
+        WHEN SUM(COALESCE(cmv.custo_medio, 0) * item_pedidos.qtd) > 0 
+        THEN ((SUM(item_pedidos."preco_desconto_rateado") - SUM(COALESCE(cmv.custo_medio, 0) * item_pedidos.qtd)) / SUM(COALESCE(cmv.custo_medio, 0) * item_pedidos.qtd)) * 100 
+        ELSE 0 
+    END AS markup_percentual
+    FROM
+        "databeautykami"."vw_distribuicao_pedidos" pedidos
+    LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+        ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+    LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+        ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+    LEFT JOIN (
         SELECT
-        item_pedidos.marca,
-        ROUND(SUM(item_pedidos."preco_desconto_rateado"), 2) AS faturamento,
-        COUNT(DISTINCT pedidos.cpfcnpj) AS clientes_unicos,
-        COUNT(DISTINCT pedidos.cod_pedido) AS qtd_pedido,
-        SUM(item_pedidos.qtd) AS qtd_itens,
-        COUNT(DISTINCT item_pedidos.cod_produto) AS qtd_sku,
-        ROUND(SUM(item_pedidos."preco_desconto_rateado") / NULLIF(COUNT(DISTINCT pedidos.cpfcnpj), 0), 2) AS Ticket_Medio_Positivacao,
-        ROUND(SUM(item_pedidos."preco_desconto_rateado") / NULLIF(COUNT(DISTINCT pedidos.cod_pedido), 0), 2) AS Ticket_Medio_Pedidos,
-        CASE 
-            WHEN SUM(COALESCE(cmv.custo_medio, 0) * item_pedidos.qtd) > 0 
-            THEN ((SUM(item_pedidos."preco_desconto_rateado") - SUM(COALESCE(cmv.custo_medio, 0) * item_pedidos.qtd)) / SUM(COALESCE(cmv.custo_medio, 0) * item_pedidos.qtd)) * 100 
-            ELSE 0 
-        END AS markup_percentual
-        FROM
-            "databeautykami"."vw_distribuicao_pedidos" pedidos
-        LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
-            ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
-        LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
-            ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
-        LEFT JOIN (
-            SELECT
             cod_pedido,
             cod_produto,
             mes_ref,
@@ -405,38 +434,31 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
                 GROUP BY 1, 2, 3, 4 , fator   
             ) cmv_aux
             group by 1,2,3,4
-        ) cmv ON pedidos.cod_pedido = cmv.cod_pedido 
-            AND item_pedidos.sku = cmv.cod_produto 
-            AND DATE_TRUNC('month', pedidos.dt_faturamento) = cmv.mes_ref
-        WHERE
-            pedidos."desc_abrev_cfop" IN (
-                'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
-                'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
-                'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
-                'Venda de mercadoria sujeita ao regime de substituição tributária',
-                'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
-            )
-            AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
-            AND pedidos.operacoes_internas = 'N'
-            AND (pedidos."origem" IN ('egestor','uno'))
-            {colaborador_filter}
-            {channel_filter}
-            {uf_filter}
-            {nome_filter}
-            GROUP BY item_pedidos.marca
-        ORDER BY faturamento DESC
-        """
-        logging.info(f"Executando query para dados de marca: {query}")
-        df = query_athena(query)
-        logging.info(f"Query para dados de marca executada com sucesso. Retornando DataFrame com {len(df)} linhas.")
-        logging.info(f"Colunas retornadas: {df.columns.tolist()}")
-        logging.info(f"Tipos de dados das colunas:\n{df.dtypes}")
-        logging.info(f"Primeiras linhas do DataFrame:\n{df.head().to_string()}")
-        return df
-    except Exception as e:
-        logging.error(f"Erro ao obter dados de marca: {str(e)}", exc_info=True)
-        return df if df is not None else pd.DataFrame()
-    
+    ) cmv ON pedidos.cod_pedido = cmv.cod_pedido 
+        AND item_pedidos.sku = cmv.cod_produto 
+        AND DATE_TRUNC('month', pedidos.dt_faturamento) = cmv.mes_ref
+    WHERE
+        pedidos."desc_abrev_cfop" IN (
+            'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
+            'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
+            'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
+            'Venda de mercadoria sujeita ao regime de substituição tributária',
+            'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
+        )
+        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+        AND pedidos.operacoes_internas = 'N'
+        AND (pedidos."origem" IN ('egestor','uno'))
+        {colaborador_filter}
+        {channel_filter}
+        {uf_filter}
+        GROUP BY item_pedidos.marca
+    ORDER BY faturamento DESC
+    """
+    logging.info(f"Executando query para dados de marca: {query}")
+    df = query_athena(query)
+    logging.info(f"Query para dados de marca executada com sucesso. Retornando DataFrame com {len(df)} linhas.")
+    return df
+
 def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
     # Adicione a lógica para filtrar por selected_colaboradores
     colaborador_filter = ""
@@ -506,7 +528,7 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
                     WHEN R_Score = 1 THEN 'Perdidos'
                     WHEN R_Score <= 3 AND F_Score = 1 THEN 'Atenção'
                     WHEN R_Score <= 3 AND F_Score BETWEEN 2 and 3 THEN 'Em risco'                 
-                    WHEN R_Score >= 3 AND F_Score >= 3 AND M_Score >= 3 THEN 'Potencial'
+                    WHEN R_Score >= 3 AND F_Score >= 3 AND M_Score >= 2 THEN 'Potencial'
                     ELSE 'Acompanhar'
                 END AS Segmento
         FROM
@@ -565,7 +587,8 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
             a.ticket_medio_posit,
             b.cod_colaborador_atual,
             a.Maior_Mes as Mes_Ultima_Compra,
-            a.Ciclo_Vida as Life_Time
+            a.Ciclo_Vida as Life_Time,
+            a.marcas_concatenadas
         FROM
             databeautykami.vw_analise_perfil_cliente a
         LEFT JOIN
@@ -606,7 +629,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
                     WHEN R_Score = 1 THEN 'Perdidos'
                     WHEN R_Score <= 3 AND F_Score = 1 THEN 'Atenção'
                     WHEN R_Score <= 3 AND F_Score BETWEEN 2 and 3 THEN 'Em risco'                 
-                    WHEN R_Score >= 3 AND F_Score >= 3 AND M_Score >= 3 THEN 'Potencial'
+                    WHEN R_Score >= 3 AND F_Score >= 3 AND M_Score >= 2 THEN 'Potencial'
                     ELSE 'Acompanhar'
                 END AS Segmento
         FROM
@@ -626,7 +649,8 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
         M_Score,
         Mes_Ultima_Compra,
         Life_time,
-        Segmento
+        Segmento,
+        marcas_concatenadas as marcas
     FROM
         rfm_segments
     WHERE
@@ -844,13 +868,17 @@ def get_colaboradores(start_date, end_date, selected_channels=None, selected_ufs
     return query_athena(query)
 
 def get_client_status(start_date, end_date, cod_colaborador, selected_channels, selected_ufs, selected_nome_colaborador, selected_brands):
+
     colaborador_filter = ""
+    if cod_colaborador or selected_nome_colaborador:
+            colaborador_filter = ""
     if cod_colaborador:
-        colaborador_filter = "AND vw_distribuicao_empresa_pedido.cod_colaborador_atual = '{}'".format(cod_colaborador)
+            colaborador_filter = f"AND vw_distribuicao_empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
-        colaboradores_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = "AND vw_distribuicao_empresa_pedido.nome_colaborador_atual IN ('{}')".format(colaboradores_str)
-    
+        # Apenas aplique o filtro de nome se não houver um código de colaborador
+        nome_str = "', '".join(selected_nome_colaborador)
+        colaborador_filter = f"AND vw_distribuicao_empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+  
     channel_filter = ""
     if selected_channels:
         channels_str = "', '".join(selected_channels)
@@ -858,8 +886,11 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
 
     brand_filter = ""
     if selected_brands:
-        brand_str = "', '".join(selected_brands)
-        brand_filter = "AND vw_distribuicao_item_pedidos.marca IN ('{}')".format(brand_str)
+            selected_brands = [brand for brand in selected_brands if brand is not None]
+            brand_str = "', '".join(selected_brands)
+            brand_filter = f"AND vw_distribuicao_item_pedidos.marca IN ('{brand_str}')"
+    else:
+            brand_filter = ""
     
     uf_filter = ""
     if selected_ufs:
