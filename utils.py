@@ -18,7 +18,7 @@ __all__ = [
     'query_athena', 'get_monthly_revenue', 'get_brand_data', 'get_rfm_summary',
     'get_rfm_segment_clients', 'get_rfm_heatmap_data', 'create_rfm_heatmap_from_aggregated',
     'get_channels_and_ufs', 'get_colaboradores', 'get_client_status',
-    'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache'
+    'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache', 'get_team_options'
 ]
 
 # Configurar logging
@@ -36,11 +36,11 @@ logging.info(f"Usando ATHENA_REGION: {ATHENA_REGION}")
 
 # Funções cacheadas
 @st.cache_data
-def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador):
-    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador)
+def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
+    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams)
 
 @st.cache_data
-def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador):
+def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
     logging.info(f"Chamando get_brand_data_cached com os seguintes parâmetros:")
     logging.info(f"cod_colaborador: {cod_colaborador}")
     logging.info(f"start_date: {start_date}")
@@ -48,7 +48,7 @@ def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channe
     logging.info(f"selected_channels: {selected_channels}")
     logging.info(f"selected_ufs: {selected_ufs}")
     logging.info(f"selected_nome_colaborador: {selected_nome_colaborador}")
-    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador)
+    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams)
 
 @st.cache_data
 def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
@@ -67,6 +67,7 @@ def get_rfm_summary_cached(cod_colaborador, start_date, end_date, selected_chann
     logging.info(f"selected_channels: {selected_channels}")
     logging.info(f"selected_ufs: {selected_ufs}")
     logging.info(f"selected_colaboradores: {selected_colaboradores}")
+    #logging.info(f"selected_colaboradores: {selected_teams}")
     return get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
 
 @st.cache_data
@@ -133,7 +134,7 @@ def query_athena(query):
         st.error(f"Erro ao executar query no Athena: {str(e)}")
         return pd.DataFrame()
     
-def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador):
+def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
     # Inicialização de variáveis
     brand_filter = ""
     channel_filter = ""
@@ -168,8 +169,8 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
         elif selected_nome_colaborador:
             # Apenas aplique o filtro de nome se não houver um código de colaborador
             nome_str = "', '".join(selected_nome_colaborador)
-            colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
-    
+            colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"    
+       
         group_by_cols = "1, 2, 3, fator"
         group_by_cols_acum = "1, 2, 3"
     
@@ -197,6 +198,8 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
     if selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
         nome_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+
+    team_filter = f"AND empresa_pedido.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
 
     
     query = f"""
@@ -229,6 +232,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
                 {channel_filter}
                 {uf_filter}
                 {brand_filter}  
+                {team_filter}
             GROUP BY {group_by_cols}
         )   boni 
     group by {group_by_cols_acum}
@@ -325,6 +329,7 @@ SELECT
         {channel_filter}
         {uf_filter}
         {brand_filter}
+        {team_filter}
     group by {group_by_cols_acum}
     ) f
     LEFT JOIN bonificacao b ON f.mes_ref = b.mes_ref 
@@ -341,6 +346,7 @@ SELECT
     logging.info(f"selected_ufs: {selected_ufs}")
     logging.info(f"selected_brands: {selected_brands}")
     logging.info(f"selected_nome_colaborador: {selected_nome_colaborador}")
+    logging.info(f"selected_teams: {selected_teams}")
 
     logging.info(f"Filtros aplicados:")
     logging.info(f"colaborador_filter: {colaborador_filter}")
@@ -363,7 +369,7 @@ SELECT
         logging.warning("Query retornou None")
     return df if df is not None else pd.DataFrame()
 
-def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador):
+def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
     colaborador_filter = ""
     if isinstance(selected_nome_colaborador, str):  # Para vendedores
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{selected_nome_colaborador}'"
@@ -374,6 +380,7 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
 
     channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
+    team_filter = f"AND empresa_pedido.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
 
     query = f"""
     SELECT
@@ -451,6 +458,7 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
         {colaborador_filter}
         {channel_filter}
         {uf_filter}
+        {team_filter}
         GROUP BY item_pedidos.marca
     ORDER BY faturamento DESC
     """
@@ -458,6 +466,21 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
     df = query_athena(query)
     logging.info(f"Query para dados de marca executada com sucesso. Retornando DataFrame com {len(df)} linhas.")
     return df
+
+@st.cache_data
+def get_team_options(start_date, end_date):
+    query = f"""
+    SELECT DISTINCT empresa_pedido.equipes
+    FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
+    LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+        ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+    WHERE date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+        AND empresa_pedido.equipes IS NOT NULL
+        AND empresa_pedido.equipes != ''
+    ORDER BY empresa_pedido.equipes
+    """
+    df = query_athena(query)
+    return df['equipes'].tolist() if not df.empty else []
 
 def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
     # Adicione a lógica para filtrar por selected_colaboradores
@@ -478,9 +501,11 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
         ufs_str = "', '".join(selected_ufs)
         uf_filter = f"AND a.uf_empresa IN ('{ufs_str}')"
 
+    #team_filter = f"AND c.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""        
+
     query = f"""
     WITH rfm_base AS (
-        SELECT
+        SELECT DISTINCT
             a.Cod_Cliente,
             a.uf_empresa,
             a.Canal_Venda,
@@ -492,10 +517,12 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
             databeautykami.vw_analise_perfil_cliente a
         LEFT JOIN
             databeautykami.vw_distribuicao_cliente_vendedor b ON a.Cod_Cliente = b.cod_cliente
+        
         WHERE 1 = 1         
         {colaborador_filter}
         {channel_filter}
         {uf_filter}
+
     ),
     rfm_scores AS (
         SELECT
@@ -573,6 +600,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
 
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
+    #team_filter = f"AND c.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
 
     query = f"""
     WITH rfm_base AS (
@@ -592,11 +620,12 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
         FROM
             databeautykami.vw_analise_perfil_cliente a
         LEFT JOIN
-            databeautykami.vw_distribuicao_cliente_vendedor b ON a.Cod_Cliente = b.cod_cliente
+            databeautykami.vw_distribuicao_cliente_vendedor b ON a.Cod_Cliente = b.cod_cliente        
         WHERE 1 = 1 
         {colaborador_filter}
         {channel_filter}
         {uf_filter}
+   
     ),
     rfm_scores AS (
         SELECT
@@ -693,6 +722,7 @@ def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channel
 
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
+    #team_filter = f"AND c.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
 
     query = f"""
     WITH rfm_base AS (
@@ -703,10 +733,12 @@ def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channel
             databeautykami.vw_analise_perfil_cliente a
         LEFT JOIN
             databeautykami.vw_distribuicao_cliente_vendedor b ON a.Cod_Cliente = b.cod_cliente
+                    
         WHERE 1 = 1 
         {colaborador_filter}
         {channel_filter}
         {uf_filter}
+  
     ),
     rfm_scores AS (
         SELECT
@@ -867,7 +899,7 @@ def get_colaboradores(start_date, end_date, selected_channels=None, selected_ufs
     
     return query_athena(query)
 
-def get_client_status(start_date, end_date, cod_colaborador, selected_channels, selected_ufs, selected_nome_colaborador, selected_brands):
+def get_client_status(start_date, end_date, cod_colaborador, selected_channels, selected_ufs, selected_nome_colaborador, selected_brands,selected_teams):
 
     colaborador_filter = ""
     if cod_colaborador or selected_nome_colaborador:
@@ -896,6 +928,8 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
     if selected_ufs:
         ufs_str = "', '".join(selected_ufs)
         uf_filter = "AND vw_distribuicao_empresa_pedido.uf_empresa_faturamento IN ('{}')".format(ufs_str)
+
+    team_filter = f"AND vw_distribuicao_empresa_pedido.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""        
 
     query = """
     WITH Meses AS (
@@ -936,6 +970,7 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
             {uf_filter}
             {colaborador_filter}
             {brand_filter}
+            {team_filter}
     ),
         PrimeirasCompras AS (
             SELECT
@@ -1139,7 +1174,8 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
         channel_filter=channel_filter,
         uf_filter=uf_filter,
         colaborador_filter=colaborador_filter,
-        brand_filter=brand_filter
+        brand_filter=brand_filter,
+        team_filter=team_filter
     )
 
     logging.info(f"Executing query for client status: {query}")

@@ -23,6 +23,7 @@ def reset_session_state():
     st.session_state['brand_data'] = None
     st.session_state['current_page'] = None
     st.session_state['show_additional_info'] = False
+    st.session_state['selected_teams'] = []
 
 def load_page_specific_state(page_name):
     if st.session_state.get('current_page') != page_name:

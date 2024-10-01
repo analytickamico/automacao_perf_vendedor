@@ -22,7 +22,8 @@ from utils import (
     get_colaboradores_cached,
     get_channels_and_ufs_cached,
     load_filter_options,
-    get_brand_options
+    get_brand_options,
+    get_team_options
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -36,44 +37,43 @@ icon = Image.open(ico_path)
 #def update_filters():
     #st.session_state['data_needs_update'] = True
 
-def manage_filters():
-    st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador", value=st.session_state['cod_colaborador'])
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", value=st.session_state['start_date'])
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", value=st.session_state['end_date'])
-
-    channels, ufs, colaboradores_options = load_filter_options()
-
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state['selected_channels'])
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state['selected_ufs'])
-    st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state['selected_colaboradores'])
-
 def load_filters():
     user = st.session_state.get('user', {})
     
     if user.get('role') in ['admin', 'gestor']:
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
+        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''), key="cod_colaborador_input_rfm")
     elif user.get('role') == 'vendedor':
         st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
     else:
         st.warning("Tipo de usuário não reconhecido.")
         return
 
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", value=st.session_state['start_date'])
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", value=st.session_state['end_date'])
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", value=st.session_state['start_date'], key="start_date_input_rfm")
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", value=st.session_state['end_date'], key="end_date_input_rfm")
 
     channels, ufs = get_channels_and_ufs_cached(st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'])
     
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state['selected_channels'])
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state['selected_ufs'])
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state['selected_channels'], key="channels_multiselect_rfm")
+
+    #if user.get('role') in ['admin', 'gestor']:
+        #team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
+        #st.session_state['selected_teams'] = st.sidebar.multiselect("Selecione as equipes", options=team_options, default=st.session_state.get('selected_teams', []), key="teams_multiselect")
+    #else:
+        #st.warning("Tipo de usuário não reconhecido.")
+        #return
+    
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state['selected_ufs'], key="ufs_multiselect_rfm")
+
+
 
     if st.session_state['user']['role'] in ['admin', 'gestor']:
         colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
         colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state['selected_colaboradores'])
+        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state['selected_colaboradores'], key="colaboradores_multiselect_rfm")
     else:
         st.session_state['selected_colaboradores'] = [st.session_state['user']['username']]
 
-    if st.sidebar.button("Atualizar Dados"):
+    if st.sidebar.button("Atualizar Dados", key="update_data_button_rfm"):
         st.session_state['data_needs_update'] = True
 
 def load_data():
@@ -236,7 +236,7 @@ def main():
         if user and isinstance(user, dict) and 'role' in user:
             if user['role'] == 'vendedor':
                 st.session_state['cod_colaborador'] = user.get('cod_colaborador', '')
-                st.sidebar.info(f"Código do Colaborador: {st.session_state['cod_colaborador']}")
+                #st.sidebar.info(f"Código do Colaborador: {st.session_state['cod_colaborador']}")
             load_filters()
         else:
             st.warning("Informações de usuário não disponíveis. Por favor, faça login novamente.")

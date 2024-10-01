@@ -8,6 +8,7 @@ from PIL import Image
 import sys
 import os
 import logging
+from datetime import datetime
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
@@ -18,6 +19,7 @@ from utils import get_colaboradores
 from utils import get_client_status
 from utils import create_client_status_chart
 from utils import get_brand_options
+from utils import get_team_options
 
 logging.basicConfig(level=logging.INFO)
 
@@ -73,31 +75,41 @@ def load_filters():
     user = st.session_state.get('user', {})
     
     if user.get('role') in ['admin', 'gestor']:
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
+        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''), key="cod_colaborador_input")
     elif user.get('role') == 'vendedor':
         st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
     else:
         st.warning("Tipo de usuário não reconhecido.")
         return
 
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date', date.today()))
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date', date.today()))
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date', date.today()), key="start_date_input")
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date', date.today()), key="end_date_input")
 
     channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
     
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state.get('selected_channels', []))
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state.get('selected_ufs', []))
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state.get('selected_channels', []), key="channels_multiselect")
+
+    if user.get('role') in ['admin', 'gestor']:
+        team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
+        st.session_state['selected_teams'] = st.sidebar.multiselect("Selecione as equipes", options=team_options, default=st.session_state.get('selected_teams', []), key="teams_multiselect")
+    else:
+        st.warning("Tipo de usuário não reconhecido.")
+        return
+
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state.get('selected_ufs', []), key="ufs_multiselect")
 
     # Adicionar carga de marcas
     brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
-    st.session_state['selected_brands'] = st.sidebar.multiselect("Selecione as marcas", options=brand_options, default=st.session_state.get('selected_brands', []))
+    st.session_state['selected_brands'] = st.sidebar.multiselect("Selecione as marcas", options=brand_options, default=st.session_state.get('selected_brands', []), key="brands_multiselect")
 
     if user.get('role') in ['admin', 'gestor']:
         colaboradores_df = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
         available_colaboradores = colaboradores_df['nome_colaborador'].tolist() if not colaboradores_df.empty else []
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state.get('selected_colaboradores', []))
+        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state.get('selected_colaboradores', []), key="colaboradores_multiselect")
 
-    if st.sidebar.button("Atualizar Dados"):
+
+
+    if st.sidebar.button("Atualizar Dados", key="update_data_button"):
         st.session_state['data_needs_update'] = True
 
 def load_data():
@@ -120,7 +132,8 @@ def load_data():
                 selected_channels=st.session_state['selected_channels'],
                 selected_ufs=st.session_state['selected_ufs'],
                 selected_brands=st.session_state['selected_brands'],
-                selected_nome_colaborador=selected_colaboradores
+                selected_nome_colaborador=selected_colaboradores,
+                selected_teams=st.session_state['selected_teams']
             )
             st.session_state['df'] = df
 
@@ -131,7 +144,8 @@ def load_data():
                 end_date=st.session_state['end_date'],
                 selected_channels=st.session_state['selected_channels'],
                 selected_ufs=st.session_state['selected_ufs'],
-                selected_nome_colaborador=selected_colaboradores
+                selected_nome_colaborador=selected_colaboradores,
+                selected_teams=st.session_state['selected_teams']
             )
             
             if st.session_state['selected_brands']:
@@ -147,7 +161,8 @@ def load_data():
                 selected_channels=st.session_state['selected_channels'],
                 selected_ufs=st.session_state['selected_ufs'],
                 selected_nome_colaborador=selected_colaboradores,
-                selected_brands=st.session_state['selected_brands']
+                selected_brands=st.session_state['selected_brands'],
+                selected_teams=st.session_state['selected_teams']
             )
             st.session_state['client_status_data'] = client_status_data
 
@@ -202,6 +217,8 @@ def create_dashboard():
     else:
         st.title('Dashboard de Vendas 📈')
 
+       
+
     # Aplicar filtro de marcas ao DataFrame principal
     if selected_brands and 'marca' in df.columns:
         df = df[df['marca'].isin(selected_brands)]
@@ -226,6 +243,11 @@ def create_dashboard():
     # Obtendo o mês mais recente
     latest_month = df['mes_ref'].max()
     latest_data = df[df['mes_ref'] == latest_month].groupby('mes_ref').sum().iloc[0]
+
+    # Adicionar a informação do mês atual
+    current_month = latest_month
+    formatted_month = current_month.strftime("%m/%Y")
+    st.markdown(f"<h4 style='text-align: left; color: #666666;'>Métricas de {formatted_month}</h4>", unsafe_allow_html=True)
 
     # Cálculo dos percentuais
     desconto_percentual = (latest_data['desconto'] / latest_data['faturamento_bruto']) * 100 if latest_data['faturamento_bruto'] != 0 else 0
