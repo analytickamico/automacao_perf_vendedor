@@ -5,9 +5,9 @@ from session_state_manager import reset_session_state,init_session_state
 
 # Dados dos usuários (hard-coded)
 users = pd.DataFrame({
-    'username': ['admin', 'gestor', 'vendedor'],
-    'password': ['admin123', 'gestor123', 'vendedor123'],
-    'email': ['admin@example.com', 'gestor@example.com', 'vendedor@example.com'],
+    'username': ['admin', 'gestor', 'vendedor', 'cris_ops'],
+    'password': ['admin123', 'gestor123', 'vendedor123','ops@2014'],
+    'email': ['admin@example.com', 'gestor@example.com', 'vendedor@example.com','cristiane'],
     'role': ['admin', 'gestor', 'vendedor'],
     'cod_colaborador': ['', '', '15']
 })

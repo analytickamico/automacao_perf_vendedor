@@ -363,67 +363,6 @@ def create_dashboard():
         with st.expander("Informações Adicionais"):
             st.dataframe(df)
 
-def update_filter_options():
-    brand_data = st.session_state.get('brand_data', pd.DataFrame())
-    df = st.session_state.get('df', pd.DataFrame())
-
-    filter_options = {
-        'marca': brand_data['marca'].unique().tolist() if 'marca' in brand_data.columns else [],
-        'canal_venda': df['canal_venda'].unique().tolist() if 'canal_venda' in df.columns else [],
-        'uf': df['uf'].unique().tolist() if 'uf' in df.columns else [],
-    }
-
-    for filter_name, options in filter_options.items():
-        if options:
-            st.session_state[f'selected_{filter_name}s'] = st.sidebar.multiselect(
-                f"Selecione {filter_name.replace('_', ' ')}s",
-                options=options,
-                default=st.session_state.get(f'selected_{filter_name}s', [])
-            )
-    
-    st.session_state['data_needs_update'] = True
-
-def load_data_for_vendedor(cod_colaborador):
-    with st.spinner('Carregando dados...'):
-        try:
-            st.session_state['df'] = get_monthly_revenue_cached(
-                cod_colaborador=cod_colaborador,
-                start_date=st.session_state['start_date'],
-                end_date=st.session_state['end_date'],
-                selected_channels=None,
-                selected_ufs=None,
-                selected_brands=None,
-                selected_nome_colaborador=None
-            )
-            
-            st.session_state['brand_data'] = get_brand_data_cached(
-                cod_colaborador=cod_colaborador,
-                start_date=st.session_state['start_date'],
-                end_date=st.session_state['end_date'],
-                selected_channels=None,
-                selected_ufs=None,
-                selected_nome_colaborador=None
-            )
-            
-            st.session_state['client_status_data'] = get_client_status(
-                start_date=st.session_state['start_date'],
-                end_date=st.session_state['end_date'],
-                cod_colaborador=cod_colaborador,
-                selected_channels=None,
-                selected_ufs=None,
-                selected_nome_colaborador=None,
-                selected_brands=None
-            )
-            
-            logging.info(f"Dados carregados para o vendedor {cod_colaborador}")
-            logging.info(f"Shape de df: {st.session_state['df'].shape}")
-            logging.info(f"Shape de brand_data: {st.session_state['brand_data'].shape}")
-            logging.info(f"Shape de client_status_data: {st.session_state['client_status_data'].shape}")
-            
-        except Exception as e:
-            st.error(f"Erro ao carregar dados para o vendedor: {str(e)}")
-            logging.error(f"Erro ao carregar dados para o vendedor: {str(e)}", exc_info=True)
-
 def main():
     init_session_state()  # Use init_session_state em vez de initialize_session_state
     if st.session_state.get('logout_requested', False):
@@ -447,7 +386,7 @@ def main():
         if user and isinstance(user, dict) and 'role' in user:
             if user['role'] == 'vendedor':
                 st.session_state['cod_colaborador'] = user.get('cod_colaborador', '')
-                st.sidebar.info(f"Código do Colaborador: {st.session_state['cod_colaborador']}")
+                #st.sidebar.info(f"Código do Colaborador: {st.session_state['cod_colaborador']}")
             load_filters()
         else:
             st.warning("Informações de usuário não disponíveis. Por favor, faça login novamente.")

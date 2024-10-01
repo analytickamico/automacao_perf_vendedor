@@ -33,19 +33,19 @@ ico_path = os.path.join(parent_dir, "favicon.ico")
 
 icon = Image.open(ico_path)
 
-def update_filters():
-    st.session_state['data_needs_update'] = True
+#def update_filters():
+    #st.session_state['data_needs_update'] = True
 
 def manage_filters():
-    st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador", value=st.session_state['cod_colaborador'], on_change=update_filters)
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", value=st.session_state['start_date'], on_change=update_filters)
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", value=st.session_state['end_date'], on_change=update_filters)
+    st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador", value=st.session_state['cod_colaborador'])
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", value=st.session_state['start_date'])
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", value=st.session_state['end_date'])
 
     channels, ufs, colaboradores_options = load_filter_options()
 
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state['selected_channels'], on_change=update_filters)
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state['selected_ufs'], on_change=update_filters)
-    st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state['selected_colaboradores'], on_change=update_filters)
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state['selected_channels'])
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state['selected_ufs'])
+    st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state['selected_colaboradores'])
 
 def load_filters():
     user = st.session_state.get('user', {})
