@@ -1198,7 +1198,11 @@ def create_client_status_chart(df):
     
     if df.empty:
         logging.warning("DataFrame is empty")
-        return None, None
+        return None, None, None
+
+    # Calcular as médias de cada status
+    status_averages = df.groupby('status')['qtd'].mean().sort_values(ascending=False)
+    logging.info(f"Calculated status averages: {status_averages}")
 
     # Pivot the dataframe
     df_pivot = df.pivot(index='mes', columns='status', values='qtd').fillna(0)
@@ -1207,30 +1211,37 @@ def create_client_status_chart(df):
 
     if 'Base' not in df_pivot.columns:
         logging.warning("Column 'Base' not found in pivoted data")
-        return None, None
+        return None, None, status_averages
 
     # Separate Base from other statuses
     base = df_pivot['Base']
     df_percentages = df_pivot.drop(columns=['Base']).div(base, axis=0) * 100
 
-    # Create the stacked bar chart for percentages
+    # Create the line chart for percentages
     fig_percentages = go.Figure()
+    
     for column in df_percentages.columns:
-        fig_percentages.add_trace(go.Bar(
+        show_text = column in ['Positivado', 'novas_aberturas']
+        fig_percentages.add_trace(go.Scatter(
             x=df_percentages.index,
             y=df_percentages[column],
+            mode='lines+markers+text' if show_text else 'lines+markers',
             name=column,
-            text=[f'{p:.1f}% ({v:,.0f})' for p, v in zip(df_percentages[column], df_pivot[column])],
-            textposition='inside'
+            text=[f'{p:.1f}%' if show_text else '' for p in df_percentages[column]],
+            textposition='top center',
+            hovertext=[f'{p:.1f}% ({v:,.0f})' for p, v in zip(df_percentages[column], df_pivot[column])],
+            hoverinfo='text+name'
         ))
 
     fig_percentages.update_layout(
-        title='Percentual e Qtd de Status dos Clientes',
-        barmode='stack',
+        title='Evolução Percentual dos Status dos Clientes',
         yaxis_title='Percentual',
         xaxis_title='Mês',
         legend_title='Status',
-        hovermode='x unified'
+        hovermode='x unified',
+        yaxis=dict(tickformat='.1f', ticksuffix='%'),
+        xaxis=dict(tickangle=45),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
     # Create the line chart for Base
@@ -1241,18 +1252,43 @@ def create_client_status_chart(df):
         mode='lines+markers+text',
         name='Base Total',
         text=[f"{v:,.0f}" for v in base],
-        textposition='top center'
+        textposition='top center',
+        line=dict(color='#1f77b4', width=2),  # Cor e espessura da linha
+        marker=dict(size=8, color='#1f77b4'),  # Tamanho e cor dos marcadores
+        textfont=dict(size=10, color='#1f77b4')  # Tamanho e cor do texto
     ))
 
     fig_base.update_layout(
         title='Evolução da Base Total de Clientes',
         xaxis_title='Mês',
-        yaxis_title='Número de Clientes',
-        hovermode='x unified'
+        xaxis=dict(
+            showline=True,
+            showgrid=False,
+            showticklabels=True,
+            linecolor='rgb(204, 204, 204)',
+            linewidth=2,
+            ticks='outside',
+            tickfont=dict(
+                family='Arial',
+                size=12,
+                color='rgb(82, 82, 82)',
+            ),
+        ),
+        yaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showline=False,
+            showticklabels=False,
+        ),
+        showlegend=False,
+        plot_bgcolor='white'
     )
 
-    logging.info("Finished creating charts")
-    return fig_percentages, fig_base
+    # Adicionar um pouco de espaço em branco acima do gráfico para os rótulos
+    y_max = max(base) * 1.1
+    fig_base.update_layout(yaxis_range=[0, y_max])
+
+    return fig_percentages, fig_base, status_averages
 
 def create_new_rfm_heatmap(df):
     if df.empty:
