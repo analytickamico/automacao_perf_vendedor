@@ -40,6 +40,10 @@ def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_c
     return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams)
 
 @st.cache_data
+def get_abc_curve_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
+    return get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams)
+
+@st.cache_data
 def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
     logging.info(f"Chamando get_brand_data_cached com os seguintes parâmetros:")
     logging.info(f"cod_colaborador: {cod_colaborador}")
@@ -133,6 +137,111 @@ def query_athena(query):
         logging.error(f"Erro ao executar query no Athena: {str(e)}")
         st.error(f"Erro ao executar query no Athena: {str(e)}")
         return pd.DataFrame()
+
+def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
+    # Inicialização de variáveis
+    brand_filter = ""
+    channel_filter = ""
+    uf_filter = ""
+    team_filter = ""
+    colaborador_filter = ""
+
+    # Filtro de marcas
+    if selected_brands:
+        brands_str = "', '".join(selected_brands)
+        brand_filter = f"AND item_pedidos.marca IN ('{brands_str}')"
+    
+    # Filtro de canais de venda
+    if selected_channels:
+        channels_str = "', '".join(selected_channels)
+        channel_filter = f"AND pedidos.canal_venda IN ('{channels_str}')"
+    
+    # Filtro de UFs
+    if selected_ufs:
+        ufs_str = "', '".join(selected_ufs)
+        uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{ufs_str}')"
+    
+    # Filtro de equipes
+    if selected_teams:
+        teams_str = "', '".join(selected_teams)
+        team_filter = f"AND empresa_pedido.equipes IN ('{teams_str}')"
+
+    # Filtro de colaborador
+    if cod_colaborador:
+        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_nome_colaborador:
+        nome_str = "', '".join(selected_nome_colaborador)
+        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+
+    query = f"""
+    WITH produto_sales AS (
+      SELECT
+        item_pedidos.sku,
+        item_pedidos.nome_produto,
+        item_pedidos.marca,
+        SUM(item_pedidos.preco_desconto_rateado) AS faturamento_liquido,
+        SUM(item_pedidos.qtd) AS quantidade_vendida
+      FROM
+        "databeautykami"."vw_distribuicao_pedidos" pedidos
+      LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+        ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+      LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+        ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+      WHERE
+        pedidos."desc_abrev_cfop" IN (
+            'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
+            'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
+            'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
+            'Venda de mercadoria sujeita ao regime de substituição tributária',
+            'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
+        )
+        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+        AND pedidos.operacoes_internas = 'N'
+        {channel_filter}
+        {uf_filter}
+        {brand_filter}
+        {team_filter}
+        {colaborador_filter}
+      GROUP BY item_pedidos.sku, item_pedidos.nome_produto, item_pedidos.marca
+    ),
+    produto_abc AS (
+      SELECT
+        *,
+        SUM(faturamento_liquido) OVER () AS total_faturamento,
+        SUM(faturamento_liquido) OVER (ORDER BY faturamento_liquido DESC) / SUM(faturamento_liquido) OVER () AS faturamento_acumulado,
+        CASE
+          WHEN SUM(faturamento_liquido) OVER (ORDER BY faturamento_liquido DESC) / SUM(faturamento_liquido) OVER () <= 0.8 THEN 'A'
+          WHEN SUM(faturamento_liquido) OVER (ORDER BY faturamento_liquido DESC) / SUM(faturamento_liquido) OVER () <= 0.95 THEN 'B'
+          ELSE 'C'
+        END AS curva
+      FROM produto_sales
+    )
+    SELECT *
+    FROM produto_abc
+    ORDER BY faturamento_liquido DESC
+    """
+    
+    logging.info(f"Query executada para Curva ABC: {query}")
+    logging.info(f"Parâmetros de entrada:")
+    logging.info(f"cod_colaborador: {cod_colaborador}")
+    logging.info(f"start_date: {start_date}")
+    logging.info(f"end_date: {end_date}")
+    logging.info(f"selected_channels: {selected_channels}")
+    logging.info(f"selected_ufs: {selected_ufs}")
+    logging.info(f"selected_brands: {selected_brands}")
+    logging.info(f"selected_nome_colaborador: {selected_nome_colaborador}")
+    logging.info(f"selected_teams: {selected_teams}")
+
+    df = query_athena(query)
+    if df is not None:
+        logging.info(f"DataFrame resultante: shape={df.shape}, colunas={df.columns.tolist()}")
+        if not df.empty:
+            logging.info(f"Primeiras linhas:\n{df.head()}")
+        else:
+            logging.warning("DataFrame está vazio após a query")
+    else:
+        logging.warning("Query retornou None")
+    return df if df is not None else pd.DataFrame()
     
 def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
     # Inicialização de variáveis
