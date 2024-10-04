@@ -167,6 +167,25 @@ def create_dashboard_content(rfm_summary, heatmap_data):
         columns_to_display = ['Segmento','Canal_Venda','Regiao','Numero_Clientes', 'Valor_Total', 'Valor_Medio', 'Recencia_Media', 'Positivacoes_Media', 'Ticket_Medio']
         rfm_summary_display = rfm_summary[columns_to_display]
 
+        with st.expander("Clique aqui para ver os critérios de segmentação dos clientes"):
+                            st.markdown("""
+                            ### Cálculo dos Scores RFM:
+
+                            Baseado nos scores RFM, os clientes são categorizados em 8 segmentos:
+
+                            . "Campeões" --> são clientes que compraram nos últimos 1-2 meses, fazem compras frequentes e gastam muito. Esses são realmente os melhores clientes atuais.
+
+                            . "Clientes fiéis" --> compraram nos últimos 4 meses ou menos e fazem compras frequentes. Eles são consistentes, mas podem não ser tão recentes quanto os "Campeões".
+
+                            . "Novos clientes" --> compraram muito recentemente (último mês), mas com baixa recompra.
+                            
+                            . "Perdidos" --> não compram há pelo menos 7 meses, é um cliente como potencialmente perdido (churn).
+
+                            . "Atenção" e "Em risco" --> são clientes que não compram há alguns meses e têm frequência baixa (1 positivação) ou média-baixa (2 a 6 positivações). Esses grupos podem precisar de estratégias de reativação.
+
+                            . "Potencial" --> são clientes que compraram nos últimos 3 meses ou mais recentemente, com boa frequência e valor médio-alto de compras. Eles podem ser alvos para estratégias de upselling.
+                            """)
+
         st.subheader("Segmentação dos Clientes RFM")
         st.dataframe(rfm_summary_display.style.format({
             'Numero_Clientes': '{:,.0f}',

@@ -177,7 +177,7 @@ def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels,
     WITH produto_sales AS (
       SELECT
         item_pedidos.sku,
-        item_pedidos.nome_produto,
+        item_pedidos.desc_produto as nome_produto,
         item_pedidos.marca,
         SUM(item_pedidos.preco_desconto_rateado) AS faturamento_liquido,
         SUM(item_pedidos.qtd) AS quantidade_vendida
@@ -202,7 +202,7 @@ def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels,
         {brand_filter}
         {team_filter}
         {colaborador_filter}
-      GROUP BY item_pedidos.sku, item_pedidos.nome_produto, item_pedidos.marca
+      GROUP BY 1,2,3
     ),
     produto_abc AS (
       SELECT
@@ -1495,3 +1495,27 @@ def debug_brand_data(df):
 def clear_cache():
     st.cache_data.clear()
 
+def format_currency(value):
+    if isinstance(value, str):
+        # Se já for uma string formatada, retorna ela mesma
+        if value.startswith("R$"):
+            return value
+        try:
+            value = float(value.replace(".", "").replace(",", ".").strip())
+        except ValueError:
+            return value  # Retorna o valor original se não puder ser convertido
+    
+    if isinstance(value, (int, float)):
+        return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    return str(value) 
+
+def format_percentage(value):
+    if isinstance(value, (int, float)):
+        return f"{value:.2%}"
+    return value
+
+def format_number(value):
+    if isinstance(value, (int, float)):
+        return f"{value:.2f}"
+    return value

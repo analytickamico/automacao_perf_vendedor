@@ -529,7 +529,7 @@ def create_dashboard():
         
         # Destacando o maior valor em cada coluna numérica
         numeric_columns = ['faturamento', 'share', 'clientes_unicos', 'qtd_pedido', 'qtd_sku', 'Ticket_Medio_Positivacao', 'markup']
-        styler.highlight_max(subset=numeric_columns, color='lightblue')
+       
         
         # Adicionando barras de progresso para o share
         styler.bar(subset=['share'], color='#5fba7d', vmin=0, vmax=1)

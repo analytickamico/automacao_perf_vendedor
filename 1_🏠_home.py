@@ -7,7 +7,8 @@ from utils import (
     get_rfm_summary,
     get_colaboradores,
     get_client_status,
-    create_new_rfm_heatmap
+    create_new_rfm_heatmap,
+    get_abc_curve_data
 )
 from PIL import Image
 from login import login, logout
