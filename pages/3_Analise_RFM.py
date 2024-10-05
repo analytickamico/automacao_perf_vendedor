@@ -1,83 +1,57 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
 import plotly.graph_objects as go
 import traceback
-from PIL import Image
-import sys
-import os
 import logging
 import time
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from session_state_manager import init_session_state, load_page_specific_state,ensure_cod_colaborador
+from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
 from utils import (
-    get_channels_and_ufs,
-    get_colaboradores,
-    get_rfm_summary,
-    get_rfm_heatmap_data,
+    get_channels_and_ufs_cached,
+    get_colaboradores_cached,
     get_rfm_summary_cached,
+    get_rfm_heatmap_data,
     create_rfm_heatmap_from_aggregated,
     get_rfm_segment_clients,
-    get_colaboradores_cached,
-    get_channels_and_ufs_cached,
-    load_filter_options,
     get_brand_options,
     get_team_options
 )
-
-logging.basicConfig(level=logging.INFO)
+import os
 
 current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 ico_path = os.path.join(parent_dir, "favicon.ico")
 
-icon = Image.open(ico_path)
-
-#def update_filters():
-    #st.session_state['data_needs_update'] = True
-
 def load_filters():
     user = st.session_state.get('user', {})
     
     if user.get('role') in ['admin', 'gestor']:
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''), key="cod_colaborador_input_rfm")
+        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
     elif user.get('role') == 'vendedor':
         st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
-    else:
-        st.warning("Tipo de usuário não reconhecido.")
-        return
 
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", value=st.session_state['start_date'], key="start_date_input_rfm")
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", value=st.session_state['end_date'], key="end_date_input_rfm")
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
 
-    channels, ufs = get_channels_and_ufs_cached(st.session_state['cod_colaborador'], st.session_state['start_date'], st.session_state['end_date'])
-    
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state['selected_channels'], key="channels_multiselect_rfm")
+    channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state.get('selected_channels', []))
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state.get('selected_ufs', []))
 
-    #if user.get('role') in ['admin', 'gestor']:
-        #team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
-        #st.session_state['selected_teams'] = st.sidebar.multiselect("Selecione as equipes", options=team_options, default=st.session_state.get('selected_teams', []), key="teams_multiselect")
-    #else:
-        #st.warning("Tipo de usuário não reconhecido.")
-        #return
-    
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state['selected_ufs'], key="ufs_multiselect_rfm")
+    if user.get('role') in ['admin', 'gestor']:
+        team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
+        st.session_state['selected_teams'] = st.sidebar.multiselect("Equipes", options=team_options, default=st.session_state.get('selected_teams', []))
 
+    brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
+    st.session_state['selected_brands'] = st.sidebar.multiselect("Marcas", options=brand_options, default=st.session_state.get('selected_brands', []))
 
-
-    if st.session_state['user']['role'] in ['admin', 'gestor']:
+    if user.get('role') in ['admin', 'gestor']:
         colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
         colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state['selected_colaboradores'], key="colaboradores_multiselect_rfm")
-    else:
-        st.session_state['selected_colaboradores'] = [st.session_state['user']['username']]
+        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state.get('selected_colaboradores', []))
 
-    if st.sidebar.button("Atualizar Dados", key="update_data_button_rfm"):
+    if st.sidebar.button("Atualizar Dados"):
         st.session_state['data_needs_update'] = True
 
 def load_data():
-    logging.info("Iniciando carregamento de dados")
     if st.session_state['data_needs_update']:
         progress_text = "Operação em andamento. Aguarde..."
         my_bar = st.progress(0, text=progress_text)
@@ -92,7 +66,7 @@ def load_data():
                     st.session_state['selected_ufs'],
                     st.session_state['selected_colaboradores']
                 )
-                my_bar.progress(40, text="Carregando mapa de calor RFM...")
+                my_bar.progress(80, text="Carregando mapa de calor RFM...")
                 st.session_state['heatmap_data'] = get_rfm_heatmap_data(
                     st.session_state['cod_colaborador'],
                     st.session_state['start_date'],
@@ -110,37 +84,8 @@ def load_data():
                 st.error(f"Erro ao carregar dados: {str(e)}")
                 logging.error(f"Erro ao carregar dados: {str(e)}")
                 logging.error(traceback.format_exc())
-    logging.info("Finalizado carregamento de dados")
 
 def create_dashboard():
-    logging.info("Iniciando criação do dashboard")
-
-    # Verificar se já carregamos os dados anteriormente
-    if 'rfm_summary' not in st.session_state or 'heatmap_data' not in st.session_state:
-        with st.spinner("Carregando dados..."):
-            st.session_state['rfm_summary'] = get_rfm_summary_cached(
-                st.session_state['cod_colaborador'],
-                st.session_state['start_date'],
-                st.session_state['end_date'],
-                st.session_state['selected_channels'],
-                st.session_state['selected_ufs'],
-                st.session_state['selected_colaboradores']
-            )
-            st.session_state['heatmap_data'] = get_rfm_heatmap_data(
-                st.session_state['cod_colaborador'],
-                st.session_state['start_date'],
-                st.session_state['end_date'],
-                st.session_state['selected_channels'],
-                st.session_state['selected_ufs'],
-                st.session_state['selected_colaboradores']
-            )
-            # Marcar que os dados foram carregados
-            st.session_state['data_loaded'] = True
-    else:
-        # Se os dados já foram carregados, marcar como True
-        st.session_state['data_loaded'] = True
-
-    # Após carregar os dados, verificar novamente
     if 'rfm_summary' in st.session_state and 'heatmap_data' in st.session_state:
         create_dashboard_content(
             st.session_state['rfm_summary'],
@@ -177,70 +122,89 @@ def create_dashboard_content(rfm_summary, heatmap_data):
             'Ticket_Medio': 'R$ {:,.2f}'  # Formatação para o novo Ticket Médio
         }))
 
-        segmentos_rfm = ['Todos'] + rfm_summary_display['Segmento'].unique().tolist()
-        segmento_selecionado = st.radio("Selecione um segmento RFM para ver os clientes:", segmentos_rfm)
+        #segmentos_rfm = ['Todos'] + rfm_summary_display['Segmento'].unique().tolist()
+        #segmento_selecionado = st.radio("Selecione um segmento RFM para ver os clientes:", segmentos_rfm)
 
         st.subheader("Clientes por Segmento RFM")
+        segmentos = ['Todos', 'Campeões', 'Clientes fiéis', 'Novos clientes', 'Perdidos', 'Atenção', 'Em risco', 'Potencial', 'Acompanhar']
+        segmentos_selecionados = st.multiselect("Selecione os segmentos", options=segmentos, default=['Atenção','Em risco'])
 
-        if segmento_selecionado != 'Todos':
-            with st.spinner(f'Carregando clientes do segmento {segmento_selecionado}...'):
+        apenas_inadimplentes = st.checkbox("Mostrar apenas clientes inadimplentes")
+
+        # Verificar se houve mudança nos segmentos selecionados
+        if 'last_segmentos' not in st.session_state or st.session_state['last_segmentos'] != segmentos_selecionados:
+            st.session_state['data_needs_update'] = True
+            st.session_state['last_segmentos'] = segmentos_selecionados
+
+        if st.session_state.get('data_needs_update', True):
+            with st.spinner('Carregando clientes dos segmentos selecionados...'):
                 clientes_segmento = get_rfm_segment_clients(
                     st.session_state['cod_colaborador'],
                     st.session_state['start_date'],
                     st.session_state['end_date'],
-                    segmento_selecionado,
+                    segmentos_selecionados,
                     st.session_state['selected_channels'],
                     st.session_state['selected_ufs'],
                     st.session_state['selected_colaboradores']
                 )
-
-                if not clientes_segmento.empty:
-                    st.write(f"Clientes do segmento: {segmento_selecionado}")
-
-                    clientes_segmento['Monetario'] = clientes_segmento['Monetario'].apply(lambda x: f"R$ {x:,.2f}")
-                    clientes_segmento['ticket_medio_posit'] = clientes_segmento['ticket_medio_posit'].apply(lambda x: f"R$ {x:,.2f}")
-
-                    st.dataframe(clientes_segmento[['Cod_Cliente', 'Nome_Cliente', 'Canal_Venda','uf_empresa','Recencia', 'Positivacao', 'Monetario', 'ticket_medio_posit','marcas','Mes_Ultima_Compra']].set_index('Cod_Cliente'))
-
-                    st.write(f"Total de clientes no segmento: {len(clientes_segmento)}")
-                else:
-                    st.warning(f"Não há clientes no segmento {segmento_selecionado} para o período e/ou filtros selecionados.")
+                st.session_state['clientes_segmento'] = clientes_segmento
+                st.session_state['data_needs_update'] = False
         else:
-            st.info("Selecione um segmento específico para ver os detalhes dos clientes.")
-    else:
-        st.warning("Não há dados de segmentos RFM disponíveis.")
-    logging.info("Finalizado criação do dashboard")
+            clientes_segmento = st.session_state['clientes_segmento']
+
+        if clientes_segmento is not None and not clientes_segmento.empty:
+            # Aplicar o filtro de inadimplentes, se necessário
+            if apenas_inadimplentes:
+                clientes_filtrados = clientes_segmento[clientes_segmento['status_inadimplente'] == 'Inadimplente']
+            else:
+                clientes_filtrados = clientes_segmento
+
+            if not clientes_filtrados.empty:
+                st.write(f"Clientes dos segmentos: {', '.join(segmentos_selecionados)}")
+                if apenas_inadimplentes:
+                    st.write("(Apenas clientes inadimplentes)")
+
+                # Função auxiliar para formatar valores monetários
+                def format_currency(value):
+                    if pd.isna(value):
+                        return "-"
+                    elif isinstance(value, str):
+                        return value
+                    else:
+                        return f"R$ {value:,.2f}"
+
+                # Formatação das colunas monetárias
+                for col in ['Monetario', 'ticket_medio_posit', 'vlr_inadimplente']:
+                    clientes_filtrados[col] = clientes_filtrados[col].apply(format_currency)
+
+                # Exibição do DataFrame
+                st.dataframe(clientes_filtrados[['Cod_Cliente', 'Nome_Cliente', 'Canal_Venda', 'uf_empresa', 'Recencia', 
+                                                'Positivacao', 'Monetario', 'ticket_medio_posit', 'marcas', 'Mes_Ultima_Compra',
+                                                'qtd_titulos', 'vlr_inadimplente', 'status_inadimplente']].set_index('Cod_Cliente'))
+
+                st.write(f"Total de clientes exibidos: {len(clientes_filtrados)}")
+            else:
+                st.warning("Não há clientes que atendam aos critérios selecionados.")
+        else:
+            st.warning("Não há clientes nos segmentos selecionados para o período e/ou filtros selecionados.")
+
+        logging.info("Finalizado criação do dashboard")
 
 
 
 def main():
-    init_session_state()  # Use init_session_state em vez de initialize_session_state
-    if st.session_state.get('logout_requested', False):
-        st.session_state['logout_requested'] = False
-        # Adiciona checagem para evitar o rerun imediato
-        if st.session_state.get('logged_in') is None: 
-            st.write("Você foi desconectado. Recarregue a página para continuar.")
-            return
-        
-    st.set_page_config(page_title="Análise Clientes", page_icon=icon, layout="wide")
+    init_session_state()
     load_page_specific_state("Analise_RFM")
 
     if not st.session_state.get('logged_in', False):
         st.warning("Por favor, faça login na página inicial para acessar esta página.")
         return
 
+    st.set_page_config(page_title="Análise Clientes", layout="wide",page_icon=ico_path)
+
     try:
         st.sidebar.title('Configurações do Dashboard')
-        
-        user = st.session_state.get('user')
-        if user and isinstance(user, dict) and 'role' in user:
-            if user['role'] == 'vendedor':
-                st.session_state['cod_colaborador'] = user.get('cod_colaborador', '')
-                #st.sidebar.info(f"Código do Colaborador: {st.session_state['cod_colaborador']}")
-            load_filters()
-        else:
-            st.warning("Informações de usuário não disponíveis. Por favor, faça login novamente.")
-            return
+        load_filters()
 
         if st.session_state.get('data_needs_update', True):
             load_data()
@@ -253,5 +217,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-   

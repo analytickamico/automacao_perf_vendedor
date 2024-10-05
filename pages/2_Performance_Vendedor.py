@@ -111,45 +111,33 @@ def apply_filters(df):
     return df
 
 def load_filters():
-    ensure_cod_colaborador()
     user = st.session_state.get('user', {})
     
     if user.get('role') in ['admin', 'gestor']:
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''), key="cod_colaborador_input")
-    #elif user.get('role') == 'vendedor':
-        #st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
-    else:
+        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
+    elif user.get('role') == 'vendedor':
         st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
-        #return
 
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date', date.today()), key="start_date_input")
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date', date.today()), key="end_date_input")
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
 
     channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
-    
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Selecione os canais de venda", options=channels, default=st.session_state.get('selected_channels', []), key="channels_multiselect")
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state.get('selected_channels', []))
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state.get('selected_ufs', []))
 
     if user.get('role') in ['admin', 'gestor']:
         team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
-        st.session_state['selected_teams'] = st.sidebar.multiselect("Selecione as equipes", options=team_options, default=st.session_state.get('selected_teams', []), key="teams_multiselect")
-    #else:
-        #st.warning("Tipo de usuário não reconhecido.")
-        #return
+        st.session_state['selected_teams'] = st.sidebar.multiselect("Equipes", options=team_options, default=st.session_state.get('selected_teams', []))
 
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("Selecione as UFs", options=ufs, default=st.session_state.get('selected_ufs', []), key="ufs_multiselect")
-
-    # Adicionar carga de marcas
     brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
-    st.session_state['selected_brands'] = st.sidebar.multiselect("Selecione as marcas", options=brand_options, default=st.session_state.get('selected_brands', []), key="brands_multiselect")
+    st.session_state['selected_brands'] = st.sidebar.multiselect("Marcas", options=brand_options, default=st.session_state.get('selected_brands', []))
 
     if user.get('role') in ['admin', 'gestor']:
-        colaboradores_df = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
-        available_colaboradores = colaboradores_df['nome_colaborador'].tolist() if not colaboradores_df.empty else []
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Selecione os colaboradores (deixe vazio para todos)", options=available_colaboradores, default=st.session_state.get('selected_colaboradores', []), key="colaboradores_multiselect")
+        colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
+        colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
+        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state.get('selected_colaboradores', []))
 
-
-
-    if st.sidebar.button("Atualizar Dados", key="update_data_button"):
+    if st.sidebar.button("Atualizar Dados"):
         st.session_state['data_needs_update'] = True
 
 def load_data():
@@ -165,7 +153,7 @@ def load_data():
             else:
                 selected_colaboradores = st.session_state['selected_colaboradores']
             
-            df = get_monthly_revenue(
+            st.session_state['df'] = get_monthly_revenue(
                 cod_colaborador=st.session_state['cod_colaborador'],
                 start_date=st.session_state['start_date'],
                 end_date=st.session_state['end_date'],
@@ -175,10 +163,9 @@ def load_data():
                 selected_nome_colaborador=selected_colaboradores,
                 selected_teams=st.session_state['selected_teams']
             )
-            st.session_state['df'] = df
 
             my_bar.progress(40, text="Carregando dados de marca...")
-            brand_data = get_brand_data(
+            st.session_state['brand_data'] = get_brand_data(
                 cod_colaborador=st.session_state['cod_colaborador'],
                 start_date=st.session_state['start_date'],
                 end_date=st.session_state['end_date'],
@@ -188,13 +175,8 @@ def load_data():
                 selected_teams=st.session_state['selected_teams']
             )
             
-            if st.session_state['selected_brands']:
-                brand_data = brand_data[brand_data['marca'].isin(st.session_state['selected_brands'])]
-            
-            st.session_state['brand_data'] = brand_data
-
             my_bar.progress(70, text="Carregando dados de status do cliente...")
-            client_status_data = get_client_status(
+            st.session_state['client_status_data'] = get_client_status(
                 start_date=st.session_state['start_date'],
                 end_date=st.session_state['end_date'],
                 cod_colaborador=st.session_state['cod_colaborador'],
@@ -204,9 +186,6 @@ def load_data():
                 selected_brands=st.session_state['selected_brands'],
                 selected_teams=st.session_state['selected_teams']
             )
-            st.session_state['client_status_data'] = client_status_data
-
-            my_bar.progress(90, text="Finalizando carregamento...")
 
             st.session_state['data_needs_update'] = False
             my_bar.progress(100, text="Carregamento concluído!")
@@ -626,33 +605,18 @@ def create_dashboard():
             st.dataframe(df)
 
 def main():
-    init_session_state()  # Use init_session_state em vez de initialize_session_state
-    if st.session_state.get('logout_requested', False):
-        st.session_state['logout_requested'] = False
-        # Adiciona checagem para evitar o rerun imediato
-        if st.session_state.get('logged_in') is None: 
-            st.write("Você foi desconectado. Recarregue a página para continuar.")
-            return
-    
-    st.set_page_config(page_title="Performance de Vendas", layout="wide", page_icon=ico_path)
+    init_session_state()
     load_page_specific_state("Performance_Vendedor")
 
     if not st.session_state.get('logged_in', False):
         st.warning("Por favor, faça login na página inicial para acessar esta página.")
         return
 
+    st.set_page_config(page_title="Performance de Vendas", layout="wide",page_icon=ico_path)
+
     try:
         st.sidebar.title('Configurações do Dashboard')
-        
-        user = st.session_state.get('user')
-        if user and isinstance(user, dict) and 'role' in user:
-            if user['role'] == 'vendedor':
-                st.session_state['cod_colaborador'] = user.get('cod_colaborador', '')
-                #st.sidebar.info(f"Código do Colaborador: {st.session_state['cod_colaborador']}")
-            load_filters()
-        else:
-            st.warning("Informações de usuário não disponíveis. Por favor, faça login novamente.")
-            return
+        load_filters()
 
         if st.session_state.get('data_needs_update', True):
             load_data()

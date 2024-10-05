@@ -79,8 +79,8 @@ def get_rfm_heatmap_data_cached(cod_colaborador, start_date, end_date, selected_
     return get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
 
 @st.cache_data
-def get_rfm_segment_clients_cached(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs, selected_colaboradores):
-    return get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs, selected_colaboradores)
+def get_rfm_segment_clients_cached(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores):
+    return get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores)
 
 @st.cache_data
 def load_filter_options(cod_colaborador, start_date, end_date):
@@ -177,7 +177,7 @@ def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels,
     WITH produto_sales AS (
       SELECT
         item_pedidos.sku,
-        item_pedidos.desc_produto as nome_produto,
+        MAX(item_pedidos.desc_produto) as nome_produto,
         item_pedidos.marca,
         SUM(item_pedidos.preco_desconto_rateado) AS faturamento_liquido,
         SUM(item_pedidos.qtd) AS quantidade_vendida
@@ -202,7 +202,7 @@ def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels,
         {brand_filter}
         {team_filter}
         {colaborador_filter}
-      GROUP BY 1,2,3
+      GROUP BY 1,3
     ),
     produto_abc AS (
       SELECT
@@ -690,12 +690,21 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
     logging.info(f"Executando query para dados de marca: {query}")
     return query_athena(query)
 
-def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, selected_channels, selected_ufs, selected_colaboradores):
+def get_segmentos_query(segmentos):
+    if 'Todos' in segmentos:
+        return "1=1"  # Isso seleciona todos os segmentos
+    elif not segmentos:
+        return "1=0"  # Não seleciona nenhum segmento se a lista estiver vazia
+    else:
+        segmentos_str = ", ".join([f"'{seg}'" for seg in segmentos if seg != 'Todos'])
+        return f"Segmento IN ({segmentos_str})"
+
+def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores):
     logging.info(f"Iniciando get_rfm_segment_clients com os seguintes parâmetros:")
     logging.info(f"cod_colaborador: {cod_colaborador}")
     logging.info(f"start_date: {start_date}")
     logging.info(f"end_date: {end_date}")
-    logging.info(f"segment: {segment}")
+    logging.info(f"segmentos: {segmentos}")
     logging.info(f"selected_channels: {selected_channels}")
     logging.info(f"selected_ufs: {selected_ufs}")
     logging.info(f"selected_colaboradores: {selected_colaboradores}")
@@ -706,14 +715,15 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
     elif selected_colaboradores:
         colaboradores_str = "', '".join(selected_colaboradores)
         colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
-
+    
+    segmentos_query = get_segmentos_query(segmentos)
+    
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
-    #team_filter = f"AND c.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
 
     query = f"""
     WITH rfm_base AS (
-        SELECT
+        SELECT DISTINCT
             a.Cod_Cliente,
             a.Nome_Cliente,
             a.uf_empresa,
@@ -725,16 +735,20 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
             b.cod_colaborador_atual,
             a.Maior_Mes as Mes_Ultima_Compra,
             a.Ciclo_Vida as Life_Time,
-            a.marcas_concatenadas
+            a.marcas_concatenadas,
+            c.status status_inadimplente,
+            c.qtd_titulos,
+            c.vlr_inadimplente
         FROM
             databeautykami.vw_analise_perfil_cliente a
-        LEFT JOIN
-            databeautykami.vw_distribuicao_cliente_vendedor b ON a.Cod_Cliente = b.cod_cliente        
+        LEFT JOIN databeautykami.vw_distribuicao_cliente_vendedor b 
+            ON a.Cod_Cliente = b.cod_cliente
+        LEFT JOIN databeautykami.tbl_distribuicao_clientes_inadimplentes c 
+            ON a.Cod_Cliente = c.Cod_Cliente and a.uf_empresa = c.uf_empresa     
         WHERE 1 = 1 
         {colaborador_filter}
         {channel_filter}
         {uf_filter}
-   
     ),
     rfm_scores AS (
         SELECT
@@ -788,11 +802,14 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segment, sele
         Mes_Ultima_Compra,
         Life_time,
         Segmento,
-        marcas_concatenadas as marcas
+        marcas_concatenadas as marcas,
+        status_inadimplente,
+        qtd_titulos,
+        vlr_inadimplente
     FROM
         rfm_segments
     WHERE
-        Segmento = '{segment}' OR '{segment}' = 'Todos'
+        {segmentos_query}
     ORDER BY
         Monetario DESC, Canal_Venda;
     """
