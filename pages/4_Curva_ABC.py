@@ -86,10 +86,11 @@ def load_filters():
         st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state.get('selected_colaboradores', []))
 
     if st.sidebar.button("Atualizar Dados"):
-        st.session_state['data_needs_update'] = True
+        load_data()
+        st.rerun()  # Isso fará com que a página seja recarregada com os novos dados
 
 def load_data():
-    if st.session_state['data_needs_update']:
+    #if st.session_state['data_needs_update']:
         progress_text = "Operação em andamento. Aguarde..."
         my_bar = st.progress(0, text=progress_text)
         try:
@@ -179,7 +180,7 @@ def create_dashboard():
         else:
             st.warning("Não há dados disponíveis para o período e filtros selecionados.")
     else:
-        st.warning("Dados não carregados. Por favor, atualize os dados usando o botão no painel lateral.")
+        st.warning("Nenhum dado carregado. Por favor, escolha os filtros e acione Atualizar Dados.")
 
 def create_abc_chart(df):
     fig = go.Figure()
@@ -248,8 +249,8 @@ def main():
         st.sidebar.title('Configurações do Dashboard')
         load_filters()
 
-        if st.session_state.get('data_needs_update', True):
-            load_data()
+        #if st.session_state.get('data_needs_update', True):
+        #    load_data()
 
         create_dashboard()
 

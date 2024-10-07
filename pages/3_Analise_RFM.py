@@ -49,10 +49,11 @@ def load_filters():
         st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state.get('selected_colaboradores', []))
 
     if st.sidebar.button("Atualizar Dados"):
-        st.session_state['data_needs_update'] = True
+        load_data()
+        st.rerun()  # Isso fará com que a página seja recarregada com os novos dados
 
 def load_data():
-    if st.session_state['data_needs_update']:
+    #if st.session_state['data_needs_update']:
         progress_text = "Operação em andamento. Aguarde..."
         my_bar = st.progress(0, text=progress_text)
         with st.spinner('Carregando dados...'):
@@ -92,7 +93,7 @@ def create_dashboard():
             st.session_state['heatmap_data']
         )
     else:
-        st.warning("Dados não disponíveis. Por favor, verifique os filtros e tente novamente.")
+        st.warning("Nenhum dado carregado. Por favor, escolha os filtros e acione Atualizar Dados.")
 
 def create_dashboard_content(rfm_summary, heatmap_data):
     st.title('Análise de Clientes RFM')
@@ -206,8 +207,8 @@ def main():
         st.sidebar.title('Configurações do Dashboard')
         load_filters()
 
-        if st.session_state.get('data_needs_update', True):
-            load_data()
+        #if st.session_state.get('data_needs_update', True):
+            #load_data()
 
         create_dashboard()
 
@@ -217,3 +218,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

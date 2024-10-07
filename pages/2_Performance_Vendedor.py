@@ -137,65 +137,73 @@ def load_filters():
         colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
         st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state.get('selected_colaboradores', []))
 
+    #if st.sidebar.button("Atualizar Dados"):
+        #st.session_state['data_needs_update'] = True
+
     if st.sidebar.button("Atualizar Dados"):
-        st.session_state['data_needs_update'] = True
+        load_data()
+        st.rerun()  # Isso fará com que a página seja recarregada com os novos dados
 
 def load_data():
-    if st.session_state['data_needs_update']:
-        progress_text = "Operação em andamento. Aguarde..."
-        my_bar = st.progress(0, text=progress_text)
+    progress_text = "Operação em andamento. Aguarde..."
+    my_bar = st.progress(0, text=progress_text)
 
-        try:
-            my_bar.progress(10, text="Carregando dados de receita mensal...")
-            
-            if st.session_state['user']['role'] == 'vendedor':
-                selected_colaboradores = st.session_state['cod_colaborador']
-            else:
-                selected_colaboradores = st.session_state['selected_colaboradores']
-            
-            st.session_state['df'] = get_monthly_revenue(
-                cod_colaborador=st.session_state['cod_colaborador'],
-                start_date=st.session_state['start_date'],
-                end_date=st.session_state['end_date'],
-                selected_channels=st.session_state['selected_channels'],
-                selected_ufs=st.session_state['selected_ufs'],
-                selected_brands=st.session_state['selected_brands'],
-                selected_nome_colaborador=selected_colaboradores,
-                selected_teams=st.session_state['selected_teams']
-            )
+    try:
+        logging.info("Iniciando carregamento de dados")
 
-            my_bar.progress(40, text="Carregando dados de marca...")
-            st.session_state['brand_data'] = get_brand_data(
-                cod_colaborador=st.session_state['cod_colaborador'],
-                start_date=st.session_state['start_date'],
-                end_date=st.session_state['end_date'],
-                selected_channels=st.session_state['selected_channels'],
-                selected_ufs=st.session_state['selected_ufs'],
-                selected_nome_colaborador=selected_colaboradores,
-                selected_teams=st.session_state['selected_teams']
-            )
-            
-            my_bar.progress(70, text="Carregando dados de status do cliente...")
-            st.session_state['client_status_data'] = get_client_status(
-                start_date=st.session_state['start_date'],
-                end_date=st.session_state['end_date'],
-                cod_colaborador=st.session_state['cod_colaborador'],
-                selected_channels=st.session_state['selected_channels'],
-                selected_ufs=st.session_state['selected_ufs'],
-                selected_nome_colaborador=selected_colaboradores,
-                selected_brands=st.session_state['selected_brands'],
-                selected_teams=st.session_state['selected_teams']
-            )
+        my_bar.progress(10, text="Carregando dados de receita mensal...")
+        st.session_state['df'] = get_monthly_revenue(
+            cod_colaborador=st.session_state['cod_colaborador'],
+            start_date=st.session_state['start_date'],
+            end_date=st.session_state['end_date'],
+            selected_channels=st.session_state['selected_channels'],
+            selected_ufs=st.session_state['selected_ufs'],
+            selected_brands=st.session_state['selected_brands'],
+            selected_nome_colaborador=st.session_state['selected_colaboradores'],
+            selected_teams=st.session_state['selected_teams']
+        )
+        logging.info("Dados de receita mensal carregados com sucesso")
 
-            st.session_state['data_needs_update'] = False
-            my_bar.progress(100, text="Carregamento concluído!")
-            time.sleep(1)
-            my_bar.empty()
+        my_bar.progress(40, text="Carregando dados de marca...")
+        st.session_state['brand_data'] = get_brand_data(
+            cod_colaborador=st.session_state['cod_colaborador'],
+            start_date=st.session_state['start_date'],
+            end_date=st.session_state['end_date'],
+            selected_channels=st.session_state['selected_channels'],
+            selected_ufs=st.session_state['selected_ufs'],
+            selected_nome_colaborador=st.session_state['selected_colaboradores'],
+            selected_teams=st.session_state['selected_teams']
+        )
+        logging.info("Dados de marca carregados com sucesso")
+        
+        my_bar.progress(70, text="Carregando dados de status do cliente...")
+        st.session_state['client_status_data'] = get_client_status(
+            start_date=st.session_state['start_date'],
+            end_date=st.session_state['end_date'],
+            cod_colaborador=st.session_state['cod_colaborador'],
+            selected_channels=st.session_state['selected_channels'],
+            selected_ufs=st.session_state['selected_ufs'],
+            selected_nome_colaborador=st.session_state['selected_colaboradores'],
+            selected_brands=st.session_state['selected_brands'],
+            selected_teams=st.session_state['selected_teams']
+        )
+        logging.info("Dados de status do cliente carregados com sucesso")
 
-        except Exception as e:
-            my_bar.empty()
-            st.error(f"Erro ao carregar dados: {str(e)}")
-            logging.error(f"Erro ao carregar dados: {str(e)}", exc_info=True)
+        my_bar.progress(100, text="Carregamento concluído!")
+        time.sleep(1)
+        my_bar.empty()
+        logging.info("Carregamento de dados concluído com sucesso")
+
+    except Exception as e:
+        my_bar.empty()
+        error_msg = f"Erro ao carregar dados: {str(e)}"
+        st.error(error_msg)
+        logging.error(error_msg, exc_info=True)
+    finally:
+        # Garantir que todas as chaves esperadas existam, mesmo em caso de erro
+        for key in ['df', 'brand_data', 'client_status_data']:
+            if key not in st.session_state:
+                st.session_state[key] = None
 
 def create_metric_html(label, value, info_text=None, info_color="green", line_break=False, is_currency=False):
     formatted_value = format_currency(value) if is_currency else value
@@ -257,7 +265,7 @@ def create_dashboard():
 
     if df is None:
         logging.warning("create_dashboard: df is None")
-        st.warning("Nenhum dado carregado. Por favor, verifique os filtros e tente novamente.")
+        st.warning("Nenhum dado carregado. Por favor, escolha os filtros e acione Atualizar Dados.")
         return
     elif df.empty:
         logging.warning(f"create_dashboard: df is empty. Columns: {df.columns}")
@@ -612,16 +620,13 @@ def main():
         st.warning("Por favor, faça login na página inicial para acessar esta página.")
         return
 
-    st.set_page_config(page_title="Performance de Vendas", layout="wide",page_icon=ico_path)
+    st.set_page_config(page_title="Performance de Vendas", layout="wide", page_icon=ico_path)
 
     try:
         st.sidebar.title('Configurações do Dashboard')
-        load_filters()
+        load_filters()  # Esta função agora inclui o botão "Atualizar Dados"
 
-        if st.session_state.get('data_needs_update', True):
-            load_data()
-
-        create_dashboard()
+        create_dashboard()  # Esta função deve usar os dados carregados em st.session_state
 
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o dashboard: {str(e)}")
