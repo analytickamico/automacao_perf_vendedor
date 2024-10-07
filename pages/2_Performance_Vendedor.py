@@ -14,15 +14,16 @@ import locale
 from decimal import Decimal
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Adicione esta linha para limpar o cache
+st.cache_data.clear()
+
+
 from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
-from utils import get_monthly_revenue
-from utils import get_brand_data
-from utils import get_channels_and_ufs
-from utils import get_colaboradores
-from utils import get_client_status
-from utils import create_client_status_chart
-from utils import get_brand_options
-from utils import get_team_options
+from utils import (
+    get_monthly_revenue, get_brand_data, get_channels_and_ufs,
+    get_colaboradores, get_client_status, create_client_status_chart,
+    get_brand_options, get_team_options, get_unique_customers_period  
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -66,6 +67,7 @@ def format_brazilian(value, is_currency=False, decimal_places=2):
             return result
     except:
         return str(value) 
+
 
 @st.cache_data
 def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador):
@@ -245,7 +247,6 @@ def format_number(value):
 def create_dashboard():
     df = st.session_state.get('df')
     brand_data = st.session_state.get('brand_data')
-
     client_status_data = st.session_state.get('client_status_data')
     cod_colaborador = st.session_state.get('cod_colaborador')
     start_date = st.session_state.get('start_date')
@@ -254,6 +255,7 @@ def create_dashboard():
     selected_ufs = st.session_state.get('selected_ufs')
     selected_brands = st.session_state.get('selected_brands')
     selected_colaboradores = st.session_state.get('selected_colaboradores')
+    selected_teams = st.session_state.get('selected_teams')
     show_additional_info = st.session_state.get('show_additional_info', False)
 
     logging.info(f"create_dashboard: cod_colaborador = {cod_colaborador}")
@@ -376,6 +378,12 @@ def create_dashboard():
     </style>
     """, unsafe_allow_html=True)
 
+    # Calcula o número de clientes únicos para todo o período
+    clientes_unicos_periodo = get_unique_customers_period(
+        cod_colaborador, start_date, end_date, selected_channels, 
+        selected_ufs, selected_brands, selected_colaboradores, selected_teams
+    )
+
     # Métricas
     col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -409,7 +417,12 @@ def create_dashboard():
         ), unsafe_allow_html=True)
 
     with col4:
-        st.markdown(create_metric_html("Clientes Únicos", f"{total_data['positivacao']:,.0f}".replace(',', '.'), info_text="<br>",line_break=True), unsafe_allow_html=True)
+        st.markdown(create_metric_html(
+            "Clientes Únicos", 
+            f"{clientes_unicos_periodo:,.0f}".replace(',', '.'), 
+            info_text="no período selecionado",
+            line_break=True
+        ), unsafe_allow_html=True)
 
     with col5:
         st.markdown(create_metric_html("Pedidos", f"{total_data['qtd_pedido']:,.0f}".replace(',', '.'), info_text="<br>",line_break=True),unsafe_allow_html=True)

@@ -1,4 +1,7 @@
 import hashlib
+import streamlit as st
+
+st.cache_data.clear()
 
 # senha e hash fornecidos
 senha = 'gui38198$Uno'

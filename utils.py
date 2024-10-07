@@ -18,7 +18,8 @@ __all__ = [
     'query_athena', 'get_monthly_revenue', 'get_brand_data', 'get_rfm_summary',
     'get_rfm_segment_clients', 'get_rfm_heatmap_data', 'create_rfm_heatmap_from_aggregated',
     'get_channels_and_ufs', 'get_colaboradores', 'get_client_status',
-    'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache', 'get_team_options'
+    'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache', 'get_team_options', 
+    'get_unique_customers_period','get_unique_customers_period_cached'
 ]
 
 # Configurar logging
@@ -38,6 +39,11 @@ logging.info(f"Usando ATHENA_REGION: {ATHENA_REGION}")
 @st.cache_data
 def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
     return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams)
+
+@st.cache_data
+def get_unique_customers_period_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
+    return get_unique_customers_period(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams)
+
 
 @st.cache_data
 def get_abc_curve_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
@@ -477,6 +483,46 @@ SELECT
     else:
         logging.warning("Query retornou None")
     return df if df is not None else pd.DataFrame()
+
+def get_unique_customers_period(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
+    colaborador_filter = ""
+    if cod_colaborador:
+        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_nome_colaborador:
+        nome_str = "', '".join(selected_nome_colaborador)
+        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+
+    channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
+    uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
+    brand_filter = f"AND item_pedidos.marca IN ('{', '.join(selected_brands)}')" if selected_brands else ""
+    team_filter = f"AND empresa_pedido.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
+
+    query = f"""
+    SELECT COUNT(DISTINCT pedidos.cpfcnpj) AS clientes_unicos
+    FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
+    LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+        ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+    LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+        ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+    WHERE
+        pedidos."desc_abrev_cfop" IN (
+            'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
+            'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
+            'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
+            'Venda de mercadoria sujeita ao regime de substituição tributária',
+            'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
+        )
+        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+        AND pedidos.operacoes_internas = 'N'
+        {colaborador_filter}
+        {channel_filter}
+        {uf_filter}
+        {brand_filter}
+        {team_filter}
+    """
+    
+    df = query_athena(query)
+    return df['clientes_unicos'].iloc[0] if not df.empty else 0
 
 def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
     colaborador_filter = ""

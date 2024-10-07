@@ -40,8 +40,7 @@ current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 ico_path = os.path.join(parent_dir, "favicon.ico")
 
-progress_text = "Operação em andamento. Aguarde..."
-my_bar = st.progress(0, text=progress_text)
+
 
 def format_currency(value):
     if isinstance(value, str):

@@ -125,6 +125,43 @@ def create_dashboard_content(rfm_summary, heatmap_data):
 
         #segmentos_rfm = ['Todos'] + rfm_summary_display['Segmento'].unique().tolist()
         #segmento_selecionado = st.radio("Selecione um segmento RFM para ver os clientes:", segmentos_rfm)
+        # Texto explicativo
+        with st.expander("Clique aqui para ver como interpretar o gráfico"):
+             st.markdown("""
+### Cálculo dos Scores RFM:
+
+Recência (R_Score): Baseado em quão recentemente o cliente fez uma compra.
+
+    5 pontos: 0-1 meses atrás
+    4 pontos: 2 meses atrás
+    3 pontos: 3 meses atrás
+    2 pontos: 4-6 meses atrás
+    1 ponto: 7 ou mais meses atrás
+
+Frequência (F_Score): Baseado no número de compras (Positivação).
+
+    5 pontos: 10 ou mais compras
+    4 pontos: 7-9 compras
+    3 pontos: 3-6 compras
+    2 pontos: 2 compras
+    1 ponto: 1 compra
+
+Monetário (M_Score): Divide os clientes em 5 grupos iguais baseado no valor total gasto, com 5 sendo o grupo que mais gasta e 1 o que menos gasta.
+
+Segmentação dos Clientes:
+
+    . "Campeões" --> são clientes que compraram nos últimos 1-2 meses, fazem compras frequentes e gastam muito. Esses são realmente os melhores clientes atuais.
+
+    . "Clientes fiéis" --> compraram nos últimos 4 meses ou menos e fazem compras frequentes. Eles são consistentes, mas podem não ser tão recentes quanto os "Campeões".
+
+    . "Novos clientes" --> compraram muito recentemente (último mês), mas com baixa recompra.
+                                
+    . "Perdidos" --> não compram há pelo menos 7 meses, é um cliente como potencialmente perdido (churn).
+
+    . "Atenção" e "Em risco" --> são clientes que não compram há alguns meses e têm frequência baixa (1 positivação) ou média-baixa (2 a 6 positivações). Esses grupos podem precisar de estratégias de reativação.
+
+    . "Potencial" --> são clientes que compraram nos últimos 3 meses ou mais recentemente, com boa frequência e valor médio-alto de compras. Eles podem ser alvos para estratégias de upselling.
+                """)
 
         st.subheader("Clientes por Segmento RFM")
         segmentos = ['Todos', 'Campeões', 'Clientes fiéis', 'Novos clientes', 'Perdidos', 'Atenção', 'Em risco', 'Potencial', 'Acompanhar']
