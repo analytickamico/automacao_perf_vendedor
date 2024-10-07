@@ -88,6 +88,23 @@ def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
 def get_colaboradores_cached(start_date, end_date, selected_channels, selected_ufs):
     return get_colaboradores(start_date, end_date, selected_channels, selected_ufs)
 
+if 'filtros' not in st.session_state:
+    st.session_state.filtros = {
+        'channels': [],
+        'ufs': [],
+        'brands': [],
+        'colaboradores': [],
+        'teams': []
+    }
+
+# 2. Função para carregar filtros de forma mais eficiente
+@st.cache_data
+def load_filter_options(cod_colaborador, start_date, end_date):
+    channels, ufs = get_channels_and_ufs(cod_colaborador, start_date, end_date)
+    brands = get_brand_options(start_date, end_date)
+    colaboradores = get_colaboradores(start_date, end_date, None, None)
+    teams = get_team_options(start_date, end_date)
+    return channels, ufs, brands, colaboradores, teams
 
 def apply_filters(df):
     if df is None or df.empty:
@@ -123,24 +140,44 @@ def load_filters():
     st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
     st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
 
-    channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state.get('selected_channels', []))
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state.get('selected_ufs', []))
-
-    if user.get('role') in ['admin', 'gestor']:
+    # Carregar opções de filtro apenas se necessário
+    if 'filter_options' not in st.session_state:
+        channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
+        brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
         team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
-        st.session_state['selected_teams'] = st.sidebar.multiselect("Equipes", options=team_options, default=st.session_state.get('selected_teams', []))
-
-    brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
-    st.session_state['selected_brands'] = st.sidebar.multiselect("Marcas", options=brand_options, default=st.session_state.get('selected_brands', []))
+        colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], None, None)
+        colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
+        
+        st.session_state['filter_options'] = {
+            'channels': channels,
+            'ufs': ufs,
+            'brands': brand_options,
+            'teams': team_options,
+            'colaboradores': colaboradores_options
+        }
+    
+    # Usar os valores armazenados em st.session_state
+    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", 
+                                                                   options=st.session_state['filter_options']['channels'], 
+                                                                   default=st.session_state.get('selected_channels', []))
+    
+    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", 
+                                                              options=st.session_state['filter_options']['ufs'], 
+                                                              default=st.session_state.get('selected_ufs', []))
 
     if user.get('role') in ['admin', 'gestor']:
-        colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
-        colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state.get('selected_colaboradores', []))
+        st.session_state['selected_teams'] = st.sidebar.multiselect("Equipes", 
+                                                                    options=st.session_state['filter_options']['teams'], 
+                                                                    default=st.session_state.get('selected_teams', []))
 
-    #if st.sidebar.button("Atualizar Dados"):
-        #st.session_state['data_needs_update'] = True
+    st.session_state['selected_brands'] = st.sidebar.multiselect("Marcas", 
+                                                                 options=st.session_state['filter_options']['brands'], 
+                                                                 default=st.session_state.get('selected_brands', []))
+
+    if user.get('role') in ['admin', 'gestor']:
+        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", 
+                                                                            options=st.session_state['filter_options']['colaboradores'], 
+                                                                            default=st.session_state.get('selected_colaboradores', []))
 
     if st.sidebar.button("Atualizar Dados"):
         load_data()
