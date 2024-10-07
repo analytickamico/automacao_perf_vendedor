@@ -86,6 +86,8 @@ def load_data():
                 logging.error(f"Erro ao carregar dados: {str(e)}")
                 logging.error(traceback.format_exc())
 
+            st.session_state['last_segmentos']  = []            
+
 def create_dashboard():
     if 'rfm_summary' in st.session_state and 'heatmap_data' in st.session_state:
         create_dashboard_content(

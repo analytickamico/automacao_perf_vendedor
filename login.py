@@ -5,12 +5,12 @@ from session_state_manager import reset_session_state,init_session_state
 
 # Dados dos usuários (hard-coded) - substituir apos poc por usuário banco
 users = pd.DataFrame({
-    'username': ['admin', 'gestor', 'vendedor','cris_ops','gestor_comercial'],
-    'nome': ['Administrador', 'Gestor', 'Vendedor','Cristina Berlanga','Patrick'],
-    'password': ['admin123', 'gestor123', 'vendedor123','dados@2024','comercial@2024'],
-    'email': ['admin@example.com', 'gestor@example.com', 'guilherme@kamico.com.br','guilherme@kamico.com.br','guilherme@kamico.com.br'],
-    'role': ['admin', 'gestor', 'vendedor','admin','gestor'],
-    'cod_colaborador': ['', '', '15','','']
+    'username': ['admin', 'gestor', 'vendedor','cris_ops','gestor_comercial','romulo'],
+    'nome': ['Administrador', 'Gestor', 'Vendedor','Cristina Berlanga','Patrick','Romulo Amaro'],
+    'password': ['admin123', 'gestor123', 'vendedor123','dados@2024','comercial@2024','distribuicao@2024'],
+    'email': ['admin@example.com', 'gestor@example.com', 'guilherme@kamico.com.br','guilherme@kamico.com.br','guilherme@kamico.com.br','romulo.amaro@kamico.com.br'],
+    'role': ['admin', 'gestor', 'vendedor','admin','gestor','gestor'],
+    'cod_colaborador': ['', '', '15','','','']
 })
 
 def login():
