@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 from pyathena.pandas.util import as_pandas
 import json
 import os
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
 
 
 
@@ -131,13 +133,25 @@ def force_update_static_data():
 
 def query_athena(query):
     try:
+        boto3.Session().get_credentials().get_frozen_credentials()
+
         conn = connect(s3_staging_dir=ATHENA_S3_STAGING_DIR, region_name=ATHENA_REGION)
         df = pd.read_sql(query, conn)
         logging.info(f"Query executada com sucesso. Resultado: {df.shape}")
         return df
+    except NoCredentialsError:
+        logging.error("Não foi possível encontrar credenciais AWS válidas.")
+        return pd.DataFrame()
+    
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        logging.error(f"Erro do cliente AWS: {error_code} - {error_message}")
+        return pd.DataFrame()
+    
     except Exception as e:
         logging.error(f"Erro ao executar query no Athena: {str(e)}")
-        return pd.DataFrame()    
+        return pd.DataFrame()   
 
 # Funções cacheadas
 @st.cache_data
