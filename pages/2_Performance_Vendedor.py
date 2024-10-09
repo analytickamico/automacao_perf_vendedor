@@ -186,8 +186,8 @@ def load_filters():
         options=st.session_state.filter_options['brands'],
         default=st.session_state.get('selected_brands', [])
     )
-
-    if user_role not in ['admin', 'gestor']:
+    logging.info(f"Papel do usuário: {user_role}")
+    if user_role in ['admin', 'gestor']:
         logging.info("Usuário é admin ou gestor, exibindo filtro de equipes")
         equipes_options = st.session_state.filter_options['equipes']
         if equipes_options:

@@ -42,7 +42,7 @@ def main():
         if login():
             st.rerun()
     else:
-        user = st.session_state.get('user', {})
+        user = st.session_state['user']        
         st.sidebar.title(f"Bem-vindo, {user.get('nome', 'Usuário')}!")
         
         # A página de Gerenciamento de Usuários será acessível diretamente pela barra lateral do Streamlit

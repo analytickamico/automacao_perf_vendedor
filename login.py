@@ -36,7 +36,7 @@ CLIENT_CONFIG = {
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
         "redirect_uris": [OAUTH_REDIRECT_URI],
-        "javascript_origins": ["https://www.databeauty.aws.kamico.com.br","http://localhost:8501"]
+        "javascript_origins": ["https://www.databeauty.aws.kamico.com.br","https://www.databeauty.aws.kamico.com.br"]
     }
 }
 
@@ -47,7 +47,7 @@ SCOPES = [
 ]
 
 # Configuração do SQLite
-DB_PATH = os.getenv("DB_PATH", "/app/data/users.db")
+DB_PATH = os.getenv("DB_PATH", "data/users.db")
 
 
 
@@ -66,25 +66,37 @@ def init_db():
 
 def handle_oauth_callback():
     logging.debug("Iniciando handle_oauth_callback")
-    flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
-    flow.redirect_uri = OAUTH_REDIRECT_URI #os.getenv("OAUTH_REDIRECT_URI")
     
+    flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
+    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "https://www.databeauty.aws.kamico.com.br")
+
     if 'code' in st.query_params:
         try:
-            logging.debug(f"Código de autorização recebido: {st.query_params['code']}")
-            flow.fetch_token(code=st.query_params['code'])
+            auth_code = st.query_params['code']
+            logging.debug(f"Código de autorização recebido: {auth_code}")
+            
+            # Debug da URI de redirecionamento
+            logging.debug(f"URI de redirecionamento configurada: {flow.redirect_uri}")
+            
+            # Tente buscar o token
+            flow.fetch_token(code=auth_code)
             credentials = flow.credentials
+            
+            # Verifique o estado das credenciais
+            logging.debug(f"Credenciais recebidas: {credentials}")
+            
             st.session_state['credentials'] = credentials.to_json()
             logging.info("Autenticação bem-sucedida")
             return True
         except Exception as e:
-            logging.error(f"Erro na autenticação: {str(e)}")
-            st.error(f"Erro na autenticação: {str(e)}")
+            #logging.error(f"Erro na autenticação: {str(e)}")
+            #st.error(f"Erro na autenticação: {str(e)}")
             st.session_state['credentials'] = None
             return False
     else:
         logging.warning("Nenhum código de autorização recebido")
-        return False    
+        return False
+   
 
 def login():
     init_session_state()
@@ -97,8 +109,9 @@ def login():
             if refresh_token_if_expired(credentials):
                 email, name = get_user_info(credentials)
                 role = get_user_role(email)
-
-                if role:
+                logging.debug(f"email de login: {email}")
+                logging.debug(f"Papel do usuário após login: {role}")
+                if role in ['admin','gestor','vendedor']:
                     st.success(f"Logado como {name} ({email})")
                     st.session_state['logged_in'] = True
                     st.session_state['user'] = {
@@ -115,29 +128,32 @@ def login():
             logging.error(f"Erro ao processar as credenciais: {str(e)}")
             st.error("Erro ao processar as credenciais. Por favor, faça login novamente.")
         
-        # Se chegamos aqui, algo deu errado com as credenciais existentes
         st.session_state['credentials'] = None
         st.session_state['logged_in'] = False
 
-    # Se não há credenciais ou se elas foram limpadas, inicie o fluxo de login
     if 'code' in st.query_params:
         if handle_oauth_callback():
             st.rerun()
     
     flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
-    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI")
+    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "https://www.databeauty.aws.kamico.com.br")
     authorization_url, _ = flow.authorization_url(prompt='consent')
 
     st.write("Por favor, faça login com sua conta Google")
     if st.button("Login com Google"):
-        st.markdown(f"[Clique aqui para fazer login]({authorization_url})")
+        # Redirecionar na mesma janela
+        st.markdown(f'<meta http-equiv="refresh" content="0; url={authorization_url}">', unsafe_allow_html=True)
 
     return False
+
 
 def logout():
     clear_credentials()
     st.session_state['user'] = None
-    st.success("Você foi desconectado. Por favor, recarregue a página.")
+    st.session_state['logged_in'] = False
+    st.success("Você foi desconectado.")
+    st.experimental_rerun()  # Forçar recarregamento da página para refletir o estado de logout
+
 
 def main():
     init_session_state()

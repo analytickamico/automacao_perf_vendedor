@@ -44,21 +44,33 @@ def get_user_info(credentials):
         raise
 
 def get_user_role(email):
+    logging.error(f"email login {email}")
     admin_email = "guilherme@kamico.com.br"
     if email == admin_email:
         return 'admin'
     
     # Consulta ao banco de dados SQLite
-    db_path = os.getenv("DB_PATH", "/caminho/para/seu/users.db")
+    db_path = os.getenv("DB_PATH")
+    if not db_path:
+        logging.error("Caminho do banco de dados não foi encontrado.")
+        return 'SemAcesso'
+    
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT role FROM users WHERE email = ?", (email,))
             result = cursor.fetchone()
-            return result[0] if result else 'vendedor'  # ou algum papel padrão
+
+            if result:
+                logging.debug(f"Resultado SQL: {result}")
+                return result[0]
+            else:
+                logging.debug("Nenhum resultado encontrado para o email fornecido.")
+                return 'SemAcesso'  # Papel padrão caso o email não seja encontrado
     except sqlite3.Error as e:
         logging.error(f"Erro ao acessar o banco de dados: {e}")
-        return 'vendedor'  # ou None, dependendo de como você quer lidar com erros
+        return 'SemAcesso'  # Ou outro valor padrão, conforme desejado
+
 
 def with_valid_credentials(func):
     """
