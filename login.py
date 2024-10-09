@@ -20,6 +20,14 @@ load_dotenv()
 logging.debug(f"GOOGLE_CLIENT_ID: {os.getenv('GOOGLE_CLIENT_ID')}")
 logging.debug(f"OAUTH_REDIRECT_URI: {os.getenv('OAUTH_REDIRECT_URI')}")
 
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+
+# Seleciona o URI de redirecionamento apropriado
+if ENVIRONMENT == "development":
+    OAUTH_REDIRECT_URI = os.getenv("DEV_REDIRECT_URI")
+else:
+    OAUTH_REDIRECT_URI = os.getenv("PROD_REDIRECT_URI")
+
 # Configurações do OAuth
 CLIENT_CONFIG = {
     "web": {
@@ -27,7 +35,7 @@ CLIENT_CONFIG = {
         "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": [os.getenv("OAUTH_REDIRECT_URI","http://localhost:8501")],
+        "redirect_uris": [OAUTH_REDIRECT_URI],
         "javascript_origins": ["http://localhost:8501", "https://www.databeauty.aws.kamico.com.br"]
     }
 }
@@ -59,7 +67,7 @@ def init_db():
 def handle_oauth_callback():
     logging.debug("Iniciando handle_oauth_callback")
     flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
-    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8501")
+    flow.redirect_uri = OAUTH_REDIRECT_URI #os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8501")
     
     if 'code' in st.query_params:
         try:

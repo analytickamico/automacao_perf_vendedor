@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     software-properties-common \
     git \
+    unzip \  # Adicionando unzip aqui
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -18,9 +19,6 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     && unzip awscliv2.zip \
     && ./aws/install \
     && rm -rf aws awscliv2.zip
-
-# Criar diretório para o banco de dados
-RUN mkdir -p /app/data
 
 # Copiar o código da aplicação
 COPY . .
