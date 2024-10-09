@@ -11,16 +11,18 @@ from session_state_manager import init_session_state, is_user_logged_in, save_cr
 from google.auth.transport.requests import Request
 from auth_utils import refresh_token_if_expired, get_user_info, get_user_role, with_valid_credentials, check_authentication
 
+# Carrega as variáveis de ambiente do arquivo .env
+load_dotenv()
+
 logging.basicConfig(level=logging.DEBUG)
 
 
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
+
 
 logging.debug(f"GOOGLE_CLIENT_ID: {os.getenv('GOOGLE_CLIENT_ID')}")
 logging.debug(f"OAUTH_REDIRECT_URI: {os.getenv('OAUTH_REDIRECT_URI')}")
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+ENVIRONMENT = os.getenv("ENVIRONMENT")
 
 # Seleciona o URI de redirecionamento apropriado
 if ENVIRONMENT == "development":
@@ -36,7 +38,7 @@ CLIENT_CONFIG = {
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
         "redirect_uris": [OAUTH_REDIRECT_URI],
-        "javascript_origins": ["https://www.databeauty.aws.kamico.com.br","https://www.databeauty.aws.kamico.com.br"]
+        "javascript_origins": ["https://www.databeauty.aws.kamico.com.br","http://localhost:8501"]
     }
 }
 
@@ -68,7 +70,7 @@ def handle_oauth_callback():
     logging.debug("Iniciando handle_oauth_callback")
     
     flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
-    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "https://www.databeauty.aws.kamico.com.br")
+    flow.redirect_uri = OAUTH_REDIRECT_URI #os.getenv("OAUTH_REDIRECT_URI", "https://www.databeauty.aws.kamico.com.br")
 
     if 'code' in st.query_params:
         try:
@@ -136,7 +138,7 @@ def login():
             st.rerun()
     
     flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
-    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "https://www.databeauty.aws.kamico.com.br")
+    flow.redirect_uri = OAUTH_REDIRECT_URI #os.getenv("OAUTH_REDIRECT_URI", "https://www.databeauty.aws.kamico.com.br")
     authorization_url, _ = flow.authorization_url(prompt='consent')
 
     st.write("Por favor, faça login com sua conta Google")

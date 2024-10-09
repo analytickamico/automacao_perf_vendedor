@@ -1,24 +1,35 @@
-import hashlib
 import streamlit as st
+import sqlite3
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+import os
+from dotenv import load_dotenv
+import logging
+import json
+from session_state_manager import init_session_state, is_user_logged_in, save_credentials, clear_credentials
+from google.auth.transport.requests import Request
+from auth_utils import refresh_token_if_expired, get_user_info, get_user_role, with_valid_credentials, check_authentication
 
-st.cache_data.clear()
+# Carrega as variáveis de ambiente do arquivo .env
+load_dotenv()
 
-# senha e hash fornecidos
-senha = 'gui38198$Uno'
-hash_fornecido = '9b5972cede761cf50c08dd1b641b5d0d'
+ENVIRONMENT = os.getenv("ENVIRONMENT")
 
-# Testando com MD5
-hash_md5 = hashlib.md5(senha.encode()).hexdigest()
-print('MD5:', hash_md5 == hash_fornecido)
+# Seleciona o URI de redirecionamento apropriado
+if ENVIRONMENT == "development":
+    OAUTH_REDIRECT_URI = os.getenv("DEV_REDIRECT_URI")
+else:
+    OAUTH_REDIRECT_URI = os.getenv("PROD_REDIRECT_URI")
 
-# Testando com SHA-1
-hash_sha1 = hashlib.sha1(senha.encode()).hexdigest()
-print('SHA-1:', hash_sha1 == hash_fornecido)
 
-# Testando com SHA-256
-hash_sha256 = hashlib.sha256(senha.encode()).hexdigest()
-print('SHA-256:', hash_sha256 == hash_fornecido)
 
+
+print(f"GOOGLE_CLIENT_ID: {os.getenv('GOOGLE_CLIENT_ID')}")
+print(f"ENVIRONMENT: {os.getenv('ENVIRONMENT')}")
+print(f"DEV_REDIRECT_URI: {os.getenv('DEV_REDIRECT_URI')}")
+print(f"PROD_REDIRECT_URI: {os.getenv('PROD_REDIRECT_URI')}")
+print(OAUTH_REDIRECT_URI)
 
 
 
