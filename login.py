@@ -36,7 +36,7 @@ CLIENT_CONFIG = {
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
         "redirect_uris": [OAUTH_REDIRECT_URI],
-        "javascript_origins": ["http://localhost:8501", "https://www.databeauty.aws.kamico.com.br"]
+        "javascript_origins": ["https://www.databeauty.aws.kamico.com.br","http://localhost:8501"]
     }
 }
 
@@ -67,7 +67,7 @@ def init_db():
 def handle_oauth_callback():
     logging.debug("Iniciando handle_oauth_callback")
     flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
-    flow.redirect_uri = OAUTH_REDIRECT_URI #os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8501")
+    flow.redirect_uri = OAUTH_REDIRECT_URI #os.getenv("OAUTH_REDIRECT_URI")
     
     if 'code' in st.query_params:
         try:
@@ -125,7 +125,7 @@ def login():
             st.rerun()
     
     flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
-    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8501")
+    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI")
     authorization_url, _ = flow.authorization_url(prompt='consent')
 
     st.write("Por favor, faça login com sua conta Google")
