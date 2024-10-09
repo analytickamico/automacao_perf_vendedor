@@ -4,7 +4,7 @@ node_modules/
 .env
 automacao_vend/lib/
 __pycache__/
-data/
+
 
 # Arquivos Python
 *.py[cod]
