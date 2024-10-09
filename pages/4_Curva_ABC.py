@@ -63,8 +63,11 @@ def load_filters():
     logging.info("Iniciando load_filters")
     initialize_session_state()
 
-    user = st.session_state.get('user', {})
-    logging.info(f"Papel do usuário: {user.get('role')}")
+    #user = st.session_state.get('user', {})
+    user = st.session_state['user']
+    user_role = user.get('role')
+    logging.info(f"Papel do usuário: {user_role}")
+
     
     static_data = get_static_data()
     logging.info(f"Dados estáticos obtidos: {static_data.keys()}")
@@ -96,7 +99,7 @@ def load_filters():
         default=st.session_state.get('selected_brands', [])
     )
 
-    if user.get('role') in ['admin', 'gestor']:
+    if user_role not in ['admin', 'gestor']:
         st.session_state.selected_teams = st.sidebar.multiselect(
             "Equipes", 
             options=st.session_state.filter_options['equipes'],
@@ -110,7 +113,7 @@ def load_filters():
             options=st.session_state.filter_options['colaboradores'],
             default=st.session_state.get('selected_colaboradores', [])
         )
-    elif user.get('role') == 'vendedor':
+    elif user_role == 'vendedor':
         st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
 
     if st.sidebar.button("Atualizar Dados"):

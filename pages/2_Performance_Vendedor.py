@@ -144,8 +144,10 @@ def load_filters():
     logging.info("Iniciando load_filters")
     initialize_session_state()
 
-    user = st.session_state.get('user', {})
-    logging.info(f"Papel do usuário: {user.get('role')}")
+    #user = st.session_state.get('user', {})
+    user = st.session_state['user']
+    user_role = user.get('role')
+    logging.info(f"Papel do usuário: {user_role}")
     
     static_data = get_static_data()
     logging.info(f"Dados estáticos obtidos: {static_data.keys()}")
@@ -185,7 +187,7 @@ def load_filters():
         default=st.session_state.get('selected_brands', [])
     )
 
-    if user.get('role') in ['admin', 'gestor']:
+    if user_role not in ['admin', 'gestor']:
         logging.info("Usuário é admin ou gestor, exibindo filtro de equipes")
         equipes_options = st.session_state.filter_options['equipes']
         if equipes_options:
@@ -215,20 +217,11 @@ def load_filters():
 
 
       
-    if user.get('role') in ['admin', 'gestor']:
+    if user_role not in ['admin', 'gestor']:
         st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
-    elif user.get('role') == 'vendedor':
+    elif user_role == 'vendedor':
         st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
 
-      
-
-
-
-
-    #if user.get('role') in ['admin', 'gestor']:
-        #st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", 
-                                                                            #options=st.session_state['filter_options']['colaboradores'], 
-                                                                            #default=st.session_state.get('selected_colaboradores', []))
     
     # Carregar opções de filtro apenas se necessário
     if 'filter_options' not in st.session_state:

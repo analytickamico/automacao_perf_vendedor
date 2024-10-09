@@ -103,7 +103,7 @@ def login():
                     st.session_state['logged_in'] = True
                     st.session_state['user'] = {
                         'email': email,
-                        'name': name,
+                        'nome': name,
                         'role': role
                     }
                     return True
