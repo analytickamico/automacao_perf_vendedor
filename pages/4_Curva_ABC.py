@@ -2,13 +2,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from utils import get_abc_curve_data_cached
+from utils import get_abc_curve_data_cached, get_static_data
 from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
-from utils import get_brand_data
-from utils import get_channels_and_ufs
-from utils import get_colaboradores
-from utils import get_brand_options
-from utils import get_team_options
 import sys
 import os
 from plotly.subplots import make_subplots
@@ -24,18 +19,6 @@ ico_path = os.path.join(parent_dir, "favicon.ico")
 
 st.set_page_config(page_title="Curva ABC - Vendas",page_icon=ico_path, layout="wide")
 
-@st.cache_data
-def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
-    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams)
-
-@st.cache_data
-def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
-    return get_channels_and_ufs(cod_colaborador, start_date, end_date)
-
-@st.cache_data
-def get_colaboradores_cached(start_date, end_date, selected_channels, selected_ufs):
-    return get_colaboradores(start_date, end_date, selected_channels, selected_ufs)
-
 current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 ico_path = os.path.join(parent_dir, "favicon.ico")
@@ -44,74 +27,119 @@ ico_path = os.path.join(parent_dir, "favicon.ico")
 
 def format_currency(value):
     if isinstance(value, str):
-        # Se já for uma string formatada, retorna ela mesma
         if value.startswith("R$"):
             return value
         try:
             value = float(value.replace(".", "").replace(",", ".").strip())
         except ValueError:
-            return value  # Retorna o valor original se não puder ser convertido
+            return value
     
     if isinstance(value, (int, float)):
         return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
     return str(value) 
 
+def initialize_session_state():
+    if 'filter_options' not in st.session_state:
+        st.session_state.filter_options = {
+            'channels': [],
+            'ufs': [],
+            'brands': [],
+            'equipes': [],
+            'colaboradores': []
+        }
+    if 'selected_channels' not in st.session_state:
+        st.session_state.selected_channels = []
+    if 'selected_ufs' not in st.session_state:
+        st.session_state.selected_ufs = []
+    if 'selected_brands' not in st.session_state:
+        st.session_state.selected_brands = []
+    if 'selected_teams' not in st.session_state:
+        st.session_state.selected_teams = []
+    if 'selected_colaboradores' not in st.session_state:
+        st.session_state.selected_colaboradores = []  
+
 def load_filters():
+    logging.info("Iniciando load_filters")
+    initialize_session_state()
+
     user = st.session_state.get('user', {})
+    logging.info(f"Papel do usuário: {user.get('role')}")
     
-    if user.get('role') in ['admin', 'gestor']:
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
-    elif user.get('role') == 'vendedor':
-        st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
+    static_data = get_static_data()
+    logging.info(f"Dados estáticos obtidos: {static_data.keys()}")
+    
+    st.session_state.filter_options['channels'] = static_data.get('canais_venda', [])
+    st.session_state.filter_options['ufs'] = static_data.get('ufs', [])
+    st.session_state.filter_options['brands'] = static_data.get('marcas', [])
+    st.session_state.filter_options['equipes'] = static_data.get('equipes', [])
+    st.session_state.filter_options['colaboradores'] = static_data.get('colaboradores', [])
 
     st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
     st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
-
-    channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state.get('selected_channels', []))
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state.get('selected_ufs', []))
+    
+    st.session_state.selected_channels = st.sidebar.multiselect(
+        "Canais de Venda", 
+        options=st.session_state.filter_options['channels'],
+        default=st.session_state.get('selected_channels', [])
+    )
+    
+    st.session_state.selected_ufs = st.sidebar.multiselect(
+        "UFs", 
+        options=st.session_state.filter_options['ufs'],
+        default=st.session_state.get('selected_ufs', [])
+    )
+    
+    st.session_state.selected_brands = st.sidebar.multiselect(
+        "Marcas", 
+        options=st.session_state.filter_options['brands'],
+        default=st.session_state.get('selected_brands', [])
+    )
 
     if user.get('role') in ['admin', 'gestor']:
-        team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
-        st.session_state['selected_teams'] = st.sidebar.multiselect("Equipes", options=team_options, default=st.session_state.get('selected_teams', []))
-
-    brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
-    st.session_state['selected_brands'] = st.sidebar.multiselect("Marcas", options=brand_options, default=st.session_state.get('selected_brands', []))
-
-    if user.get('role') in ['admin', 'gestor']:
-        colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
-        colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state.get('selected_colaboradores', []))
+        st.session_state.selected_teams = st.sidebar.multiselect(
+            "Equipes", 
+            options=st.session_state.filter_options['equipes'],
+            default=st.session_state.get('selected_teams', [])
+        )
+        
+        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
+        
+        st.session_state.selected_colaboradores = st.sidebar.multiselect(
+            "Colaboradores", 
+            options=st.session_state.filter_options['colaboradores'],
+            default=st.session_state.get('selected_colaboradores', [])
+        )
+    elif user.get('role') == 'vendedor':
+        st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
 
     if st.sidebar.button("Atualizar Dados"):
         load_data()
-        st.rerun()  # Isso fará com que a página seja recarregada com os novos dados
+        st.rerun()
 
 def load_data():
-    #if st.session_state['data_needs_update']:
-        progress_text = "Operação em andamento. Aguarde..."
-        my_bar = st.progress(0, text=progress_text)
-        try:
-            my_bar.progress(50, text="Carregando dados dos produtos...")
-            st.session_state['abc_data'] = get_abc_curve_data_cached(
-                cod_colaborador=st.session_state['cod_colaborador'],
-                start_date=st.session_state['start_date'],
-                end_date=st.session_state['end_date'],
-                selected_channels=st.session_state['selected_channels'],
-                selected_ufs=st.session_state['selected_ufs'],
-                selected_brands=st.session_state['selected_brands'],
-                selected_nome_colaborador=st.session_state['selected_colaboradores'],
-                selected_teams=st.session_state['selected_teams']
-            )
-            my_bar.progress(100, text="Carregamento concluído!")
-            time.sleep(1)
-            my_bar.empty()
-            st.session_state['data_needs_update'] = False
-        except Exception as e:
-            my_bar.empty()
-            st.error(f"Erro ao carregar dados: {str(e)}")
-            logging.error(f"Erro ao carregar dados: {str(e)}", exc_info=True)
+    progress_text = "Operação em andamento. Aguarde..."
+    my_bar = st.progress(0, text=progress_text)
+    try:
+        my_bar.progress(50, text="Carregando dados dos produtos...")
+        st.session_state['abc_data'] = get_abc_curve_data_cached(
+            cod_colaborador=st.session_state['cod_colaborador'],
+            start_date=st.session_state['start_date'],
+            end_date=st.session_state['end_date'],
+            selected_channels=st.session_state.selected_channels,
+            selected_ufs=st.session_state.selected_ufs,
+            selected_brands=st.session_state.selected_brands,
+            selected_nome_colaborador=st.session_state.selected_colaboradores,
+            selected_teams=st.session_state.selected_teams
+        )
+        my_bar.progress(100, text="Carregamento concluído!")
+        time.sleep(1)
+        my_bar.empty()
+        st.session_state['data_needs_update'] = False
+    except Exception as e:
+        my_bar.empty()
+        st.error(f"Erro ao carregar dados: {str(e)}")
+        logging.error(f"Erro ao carregar dados: {str(e)}", exc_info=True)
 
 def create_dashboard():
     st.title("Curva ABC de Produtos")

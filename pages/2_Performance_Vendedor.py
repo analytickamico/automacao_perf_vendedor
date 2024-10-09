@@ -15,15 +15,15 @@ from decimal import Decimal
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Adicione esta linha para limpar o cache
-st.cache_data.clear()
+#st.cache_data.clear()
 
 
 from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
 from utils import (
     get_monthly_revenue, get_brand_data, get_channels_and_ufs,
     get_colaboradores, get_client_status, create_client_status_chart,
-    get_brand_options, get_team_options, get_unique_customers_period  
-)
+    get_unique_customers_period, get_static_data
+    )
 
 logging.basicConfig(level=logging.INFO)
 
@@ -69,22 +69,22 @@ def format_brazilian(value, is_currency=False, decimal_places=2):
         return str(value) 
 
 
-@st.cache_data
-def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador):
+@st.cache_data(ttl=3600)
+def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
     channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
     brand_filter = f"AND item_pedidos.marca IN ('{', '.join(selected_brands)}')" if selected_brands else ""
-    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador)
+    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams)
 
-@st.cache_data
-def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador):
-    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador)
+@st.cache_data(ttl=3600, max_entries=100)
+def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
+    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams)
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
     return get_channels_and_ufs(cod_colaborador, start_date, end_date)
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def get_colaboradores_cached(start_date, end_date, selected_channels, selected_ufs):
     return get_colaboradores(start_date, end_date, selected_channels, selected_ufs)
 
@@ -97,14 +97,25 @@ if 'filtros' not in st.session_state:
         'teams': []
     }
 
-# 2. Função para carregar filtros de forma mais eficiente
-@st.cache_data
-def load_filter_options(cod_colaborador, start_date, end_date):
-    channels, ufs = get_channels_and_ufs(cod_colaborador, start_date, end_date)
-    brands = get_brand_options(start_date, end_date)
-    colaboradores = get_colaboradores(start_date, end_date, None, None)
-    teams = get_team_options(start_date, end_date)
-    return channels, ufs, brands, colaboradores, teams
+def initialize_session_state():
+    if 'filter_options' not in st.session_state:
+        st.session_state.filter_options = {
+            'channels': [],
+            'ufs': [],
+            'brands': [],
+            'equipes': [],
+            'colaboradores': []
+        }
+    if 'selected_channels' not in st.session_state:
+        st.session_state.selected_channels = []
+    if 'selected_ufs' not in st.session_state:
+        st.session_state.selected_ufs = []
+    if 'selected_brands' not in st.session_state:
+        st.session_state.selected_brands = []
+    if 'selected_teams' not in st.session_state:
+        st.session_state.selected_teams = []
+    if 'selected_colaboradores' not in st.session_state:
+        st.session_state.selected_colaboradores = [] 
 
 def apply_filters(df):
     if df is None or df.empty:
@@ -130,54 +141,110 @@ def apply_filters(df):
     return df
 
 def load_filters():
+    logging.info("Iniciando load_filters")
+    initialize_session_state()
+
     user = st.session_state.get('user', {})
+    logging.info(f"Papel do usuário: {user.get('role')}")
     
+    static_data = get_static_data()
+    logging.info(f"Dados estáticos obtidos: {static_data.keys()}")
+    
+    st.session_state.filter_options['equipes'] = static_data.get('equipes', [])
+    st.session_state.filter_options['colaboradores'] = static_data.get('colaboradores', [])
+    logging.info(f"Equipes carregadas: {len(st.session_state.filter_options['equipes'])}")
+    logging.info(f"Colaboradores carregados: {len(st.session_state.filter_options['colaboradores'])}")
+    
+    # Atualizar filter_options com os dados estáticos
+    st.session_state.filter_options['channels'] = static_data.get('canais_venda', [])
+    st.session_state.filter_options['ufs'] = static_data.get('ufs', [])
+    st.session_state.filter_options['brands'] = static_data.get('marcas', [])
+    st.session_state.filter_options['equipes'] = static_data.get('equipes', [])
+
+    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
+    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
+    
+    # Usar dados estáticos para canais de venda
+    st.session_state.selected_channels = st.sidebar.multiselect(
+        "Canais de Venda", 
+        options=st.session_state.filter_options['channels'],
+        default=st.session_state.get('selected_channels', [])
+    )
+    
+    # Usar dados estáticos para UFs
+    st.session_state.selected_ufs = st.sidebar.multiselect(
+        "UFs", 
+        options=st.session_state.filter_options['ufs'],
+        default=st.session_state.get('selected_ufs', [])
+    )
+    
+    # Usar dados estáticos para marcas
+    st.session_state.selected_brands = st.sidebar.multiselect(
+        "Marcas", 
+        options=st.session_state.filter_options['brands'],
+        default=st.session_state.get('selected_brands', [])
+    )
+
+    if user.get('role') in ['admin', 'gestor']:
+        logging.info("Usuário é admin ou gestor, exibindo filtro de equipes")
+        equipes_options = st.session_state.filter_options['equipes']
+        if equipes_options:
+            st.session_state.selected_teams = st.sidebar.multiselect(
+                "Equipes", 
+                options=equipes_options,
+                default=st.session_state.get('selected_teams', [])
+            )
+            logging.info(f"Equipes selecionadas: {st.session_state.selected_teams}")
+        else:
+            logging.warning("Nenhuma opção de equipe disponível para exibição")
+        
+        # Filtro de colaboradores
+        logging.info("Exibindo filtro de colaboradores")
+        colaboradores_options = st.session_state.filter_options['colaboradores']
+        if colaboradores_options:
+            st.session_state.selected_colaboradores = st.sidebar.multiselect(
+                "Colaboradores", 
+                options=colaboradores_options,
+                default=st.session_state.get('selected_colaboradores', [])
+            )
+            logging.info(f"Colaboradores selecionados: {st.session_state.selected_colaboradores}")
+        else:
+            logging.warning("Nenhuma opção de colaborador disponível para exibição")
+    else:
+        logging.info("Usuário não é admin ou gestor, filtros de equipes e colaboradores não serão exibidos")
+
+
+      
     if user.get('role') in ['admin', 'gestor']:
         st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
     elif user.get('role') == 'vendedor':
         st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
 
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
+      
 
+
+
+
+    #if user.get('role') in ['admin', 'gestor']:
+        #st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", 
+                                                                            #options=st.session_state['filter_options']['colaboradores'], 
+                                                                            #default=st.session_state.get('selected_colaboradores', []))
+    
     # Carregar opções de filtro apenas se necessário
     if 'filter_options' not in st.session_state:
-        channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
-        brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
-        team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
+        #channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
+        #brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
+        #team_options = get_team_options()
         colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], None, None)
         colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
         
         st.session_state['filter_options'] = {
-            'channels': channels,
-            'ufs': ufs,
-            'brands': brand_options,
-            'teams': team_options,
+            #'channels': channels,
+            #'ufs': ufs,
+            #'brands': brand_options,
+            #'teams': team_options,
             'colaboradores': colaboradores_options
         }
-    
-    # Usar os valores armazenados em st.session_state
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", 
-                                                                   options=st.session_state['filter_options']['channels'], 
-                                                                   default=st.session_state.get('selected_channels', []))
-    
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", 
-                                                              options=st.session_state['filter_options']['ufs'], 
-                                                              default=st.session_state.get('selected_ufs', []))
-
-    if user.get('role') in ['admin', 'gestor']:
-        st.session_state['selected_teams'] = st.sidebar.multiselect("Equipes", 
-                                                                    options=st.session_state['filter_options']['teams'], 
-                                                                    default=st.session_state.get('selected_teams', []))
-
-    st.session_state['selected_brands'] = st.sidebar.multiselect("Marcas", 
-                                                                 options=st.session_state['filter_options']['brands'], 
-                                                                 default=st.session_state.get('selected_brands', []))
-
-    if user.get('role') in ['admin', 'gestor']:
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", 
-                                                                            options=st.session_state['filter_options']['colaboradores'], 
-                                                                            default=st.session_state.get('selected_colaboradores', []))
 
     if st.sidebar.button("Atualizar Dados"):
         load_data()
@@ -191,7 +258,7 @@ def load_data():
         logging.info("Iniciando carregamento de dados")
 
         my_bar.progress(10, text="Carregando dados de receita mensal...")
-        st.session_state['df'] = get_monthly_revenue(
+        st.session_state['df'] = get_monthly_revenue_cached(
             cod_colaborador=st.session_state['cod_colaborador'],
             start_date=st.session_state['start_date'],
             end_date=st.session_state['end_date'],
@@ -204,7 +271,7 @@ def load_data():
         logging.info("Dados de receita mensal carregados com sucesso")
 
         my_bar.progress(40, text="Carregando dados de marca...")
-        st.session_state['brand_data'] = get_brand_data(
+        st.session_state['brand_data'] = get_brand_data_cached(
             cod_colaborador=st.session_state['cod_colaborador'],
             start_date=st.session_state['start_date'],
             end_date=st.session_state['end_date'],
@@ -282,6 +349,7 @@ def format_number(value):
     return value
 
 def create_dashboard():
+
     df = st.session_state.get('df')
     brand_data = st.session_state.get('brand_data')
     client_status_data = st.session_state.get('client_status_data')

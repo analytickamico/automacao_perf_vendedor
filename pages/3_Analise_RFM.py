@@ -6,14 +6,11 @@ import logging
 import time
 from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
 from utils import (
-    get_channels_and_ufs_cached,
-    get_colaboradores_cached,
     get_rfm_summary_cached,
     get_rfm_heatmap_data,
     create_rfm_heatmap_from_aggregated,
     get_rfm_segment_clients,
-    get_brand_options,
-    get_team_options
+    get_static_data
 )
 import os
 
@@ -21,72 +18,130 @@ current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 ico_path = os.path.join(parent_dir, "favicon.ico")
 
+
+def initialize_session_state():
+    if 'filter_options' not in st.session_state:
+        st.session_state.filter_options = {
+            'channels': [],
+            'ufs': [],
+            'brands': [],
+            'equipes': [],
+            'colaboradores': []
+        }
+    if 'selected_channels' not in st.session_state:
+        st.session_state.selected_channels = []
+    if 'selected_ufs' not in st.session_state:
+        st.session_state.selected_ufs = []
+    if 'selected_brands' not in st.session_state:
+        st.session_state.selected_brands = []
+    if 'selected_teams' not in st.session_state:
+        st.session_state.selected_teams = []
+    if 'selected_colaboradores' not in st.session_state:
+        st.session_state.selected_colaboradores = []    
+
 def load_filters():
+    logging.info("Iniciando load_filters")
+    initialize_session_state()
+
     user = st.session_state.get('user', {})
+    logging.info(f"Papel do usuário: {user.get('role')}")
     
-    if user.get('role') in ['admin', 'gestor']:
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
-    elif user.get('role') == 'vendedor':
-        st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
+    static_data = get_static_data()
+    logging.info(f"Dados estáticos obtidos: {static_data.keys()}")
+    
+    st.session_state.filter_options['channels'] = static_data.get('canais_venda', [])
+    st.session_state.filter_options['ufs'] = static_data.get('ufs', [])
+    st.session_state.filter_options['brands'] = static_data.get('marcas', [])
+    st.session_state.filter_options['equipes'] = static_data.get('equipes', [])
+    st.session_state.filter_options['colaboradores'] = static_data.get('colaboradores', [])
 
     st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
     st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
-
-    channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
-    st.session_state['selected_channels'] = st.sidebar.multiselect("Canais de Venda", options=channels, default=st.session_state.get('selected_channels', []))
-    st.session_state['selected_ufs'] = st.sidebar.multiselect("UFs", options=ufs, default=st.session_state.get('selected_ufs', []))
+    
+    st.session_state.selected_channels = st.sidebar.multiselect(
+        "Canais de Venda", 
+        options=st.session_state.filter_options['channels'],
+        default=st.session_state.get('selected_channels', [])
+    )
+    
+    st.session_state.selected_ufs = st.sidebar.multiselect(
+        "UFs", 
+        options=st.session_state.filter_options['ufs'],
+        default=st.session_state.get('selected_ufs', [])
+    )
+    
+    st.session_state.selected_brands = st.sidebar.multiselect(
+        "Marcas", 
+        options=st.session_state.filter_options['brands'],
+        default=st.session_state.get('selected_brands', [])
+    )
 
     if user.get('role') in ['admin', 'gestor']:
-        team_options = get_team_options(st.session_state['start_date'], st.session_state['end_date'])
-        st.session_state['selected_teams'] = st.sidebar.multiselect("Equipes", options=team_options, default=st.session_state.get('selected_teams', []))
-
-    brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
-    st.session_state['selected_brands'] = st.sidebar.multiselect("Marcas", options=brand_options, default=st.session_state.get('selected_brands', []))
-
-    if user.get('role') in ['admin', 'gestor']:
-        colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], st.session_state['selected_channels'], st.session_state['selected_ufs'])
-        colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
-        st.session_state['selected_colaboradores'] = st.sidebar.multiselect("Colaboradores", options=colaboradores_options, default=st.session_state.get('selected_colaboradores', []))
+        st.session_state.selected_teams = st.sidebar.multiselect(
+            "Equipes", 
+            options=st.session_state.filter_options['equipes'],
+            default=st.session_state.get('selected_teams', [])
+        )
+        
+        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
+        
+        st.session_state.selected_colaboradores = st.sidebar.multiselect(
+            "Colaboradores", 
+            options=st.session_state.filter_options['colaboradores'],
+            default=st.session_state.get('selected_colaboradores', [])
+        )
+    elif user.get('role') == 'vendedor':
+        st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
 
     if st.sidebar.button("Atualizar Dados"):
         load_data()
-        st.rerun()  # Isso fará com que a página seja recarregada com os novos dados
+        st.rerun()
 
 def load_data():
-    #if st.session_state['data_needs_update']:
-        progress_text = "Operação em andamento. Aguarde..."
-        my_bar = st.progress(0, text=progress_text)
-        with st.spinner('Carregando dados...'):
-            try:
-                my_bar.progress(50, text="Carregando dados dos clientes...")
-                st.session_state['rfm_summary'] = get_rfm_summary_cached(
-                    st.session_state['cod_colaborador'],
-                    st.session_state['start_date'],
-                    st.session_state['end_date'],
-                    st.session_state['selected_channels'],
-                    st.session_state['selected_ufs'],
-                    st.session_state['selected_colaboradores']
-                )
-                my_bar.progress(80, text="Carregando mapa de calor RFM...")
-                st.session_state['heatmap_data'] = get_rfm_heatmap_data(
-                    st.session_state['cod_colaborador'],
-                    st.session_state['start_date'],
-                    st.session_state['end_date'],
-                    st.session_state['selected_channels'],
-                    st.session_state['selected_ufs'],
-                    st.session_state['selected_colaboradores']
-                )
-                st.session_state['data_needs_update'] = False
-                my_bar.progress(100, text="Carregamento concluído!")
-                time.sleep(1)
-                my_bar.empty()
-            except Exception as e:
-                my_bar.empty()
-                st.error(f"Erro ao carregar dados: {str(e)}")
-                logging.error(f"Erro ao carregar dados: {str(e)}")
-                logging.error(traceback.format_exc())
+    progress_text = "Operação em andamento. Aguarde..."
+    my_bar = st.progress(0, text=progress_text)
+    with st.spinner('Carregando dados...'):
+        try:
+            my_bar.progress(50, text="Carregando dados dos clientes...")
+            st.session_state['rfm_summary'] = get_rfm_summary_cached(
+                st.session_state['cod_colaborador'],
+                st.session_state['start_date'],
+                st.session_state['end_date'],
+                st.session_state.selected_channels,
+                st.session_state.selected_ufs,
+                st.session_state.selected_colaboradores,
+                st.session_state.selected_teams
+            )
+            my_bar.progress(80, text="Carregando mapa de calor RFM...")
+            st.session_state['heatmap_data'] = get_rfm_heatmap_data(
+                st.session_state['cod_colaborador'],
+                st.session_state['start_date'],
+                st.session_state['end_date'],
+                st.session_state.selected_channels,
+                st.session_state.selected_ufs,
+                st.session_state.selected_colaboradores,
+                st.session_state.selected_teams
+            )
+            st.session_state['data_needs_update'] = False
+            my_bar.progress(100, text="Carregamento concluído!")
+            time.sleep(1)
+            my_bar.empty()
+        except Exception as e:
+            my_bar.empty()
+            st.error(f"Erro ao carregar dados: {str(e)}")
+            logging.error(f"Erro ao carregar dados: {str(e)}")
+            logging.error(traceback.format_exc())
 
-            st.session_state['last_segmentos']  = []            
+        st.session_state['last_segmentos'] = []
+
+def create_dashboard():
+    if 'rfm_summary' in st.session_state and 'heatmap_data' in st.session_state:
+        create_dashboard_content(
+            st.session_state['rfm_summary'],
+            st.session_state['heatmap_data']
+        )
+    else:
+        st.warning("Nenhum dado carregado. Por favor, escolha os filtros e acione Atualizar Dados.")          
 
 def create_dashboard():
     if 'rfm_summary' in st.session_state and 'heatmap_data' in st.session_state:
@@ -113,7 +168,7 @@ def create_dashboard_content(rfm_summary, heatmap_data):
 
         # Selecionar apenas as colunas desejadas
         columns_to_display = ['Segmento','Canal_Venda','Regiao','Numero_Clientes', 'Valor_Total', 'Valor_Medio', 'Recencia_Media', 'Positivacoes_Media', 'Ticket_Medio']
-        rfm_summary_display = rfm_summary[columns_to_display]
+        rfm_summary_display = rfm_summary[columns_to_display].set_index('Segmento')
 
         st.subheader("Segmentação dos Clientes RFM")
         st.dataframe(rfm_summary_display.style.format({
@@ -185,7 +240,8 @@ Segmentação dos Clientes:
                     segmentos_selecionados,
                     st.session_state['selected_channels'],
                     st.session_state['selected_ufs'],
-                    st.session_state['selected_colaboradores']
+                    st.session_state['selected_colaboradores'],
+                    st.session_state['selected_teams']
                 )
                 st.session_state['clientes_segmento'] = clientes_segmento
                 st.session_state['data_needs_update'] = False
@@ -240,17 +296,12 @@ def main():
         st.warning("Por favor, faça login na página inicial para acessar esta página.")
         return
 
-    st.set_page_config(page_title="Análise Clientes", layout="wide",page_icon=ico_path)
+    st.set_page_config(page_title="Análise Clientes", layout="wide", page_icon=ico_path)
 
     try:
         st.sidebar.title('Configurações do Dashboard')
         load_filters()
-
-        #if st.session_state.get('data_needs_update', True):
-            #load_data()
-
         create_dashboard()
-
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o dashboard: {str(e)}")
         logging.error(f"Erro ao carregar o dashboard: {str(e)}", exc_info=True)

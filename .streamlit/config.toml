@@ -6,8 +6,9 @@ textColor = "#262730"
 font = "sans serif"
 
 [server]
-enableCORS = true
-enableXsrfProtection = true
+enableCORS = false
+enableXsrfProtection = false
+enableStaticServing = false
 
 [browser]
 serverAddress = "localhost"
@@ -18,6 +19,7 @@ magicEnabled = true
 
 [client]
 showErrorDetails = true
+toolbarMode = "minimal"
 
 [global]
 developmentMode = false

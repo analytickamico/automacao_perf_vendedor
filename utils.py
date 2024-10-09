@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
@@ -8,6 +8,7 @@ import logging
 from pyathena import connect
 from dotenv import load_dotenv
 from pyathena.pandas.util import as_pandas
+import json
 import os
 
 
@@ -18,8 +19,8 @@ __all__ = [
     'query_athena', 'get_monthly_revenue', 'get_brand_data', 'get_rfm_summary',
     'get_rfm_segment_clients', 'get_rfm_heatmap_data', 'create_rfm_heatmap_from_aggregated',
     'get_channels_and_ufs', 'get_colaboradores', 'get_client_status',
-    'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache', 'get_team_options', 
-    'get_unique_customers_period','get_unique_customers_period_cached'
+    'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache', 'get_team_options',
+    'get_static_data', 'force_update_static_data'
 ]
 
 # Configurar logging
@@ -34,6 +35,109 @@ ATHENA_REGION = os.environ.get('ATHENA_REGION', 'us-east-1')
 
 logging.info(f"Usando ATHENA_S3_STAGING_DIR: {ATHENA_S3_STAGING_DIR}")
 logging.info(f"Usando ATHENA_REGION: {ATHENA_REGION}")
+
+
+def load_from_cache(cache_key):
+    cache_file = f"cache_{cache_key}.json"
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            cache_data = json.load(f)
+        if datetime.now() < datetime.fromisoformat(cache_data['expires']):
+            return cache_data['data']
+    return None
+
+def save_to_cache(cache_key, data, ttl_hours=24):
+    cache_file = f"cache_{cache_key}.json"
+    expires = (datetime.now() + timedelta(hours=ttl_hours)).isoformat()
+    cache_data = {
+        'data': data,
+        'expires': expires
+    }
+    with open(cache_file, 'w') as f:
+        json.dump(cache_data, f)
+
+@st.cache_data(ttl=24*60*60)
+def get_static_data():
+    logging.info("Iniciando get_static_data")
+    cache_key = 'static_data'
+    cached_data = load_from_cache(cache_key)
+    
+    if cached_data is not None and all(key in cached_data for key in ['canais_venda', 'marcas', 'ufs', 'equipes', 'colaboradores']):
+        logging.info(f"Dados completos carregados do cache: {cached_data.keys()}")
+        return cached_data
+    
+    logging.info("Cache incompleto ou não encontrado. Buscando dados do banco...")
+    
+    canais_venda = get_canais_venda()
+    marcas = get_marcas_from_database()
+    ufs = get_ufs_from_database()
+    equipes = get_team_options()
+    colaboradores = get_colaboradores_options()
+    
+    static_data = {
+        'canais_venda': canais_venda,
+        'marcas': marcas,
+        'ufs': ufs,
+        'equipes': equipes,
+        'colaboradores': colaboradores
+    }
+    
+    logging.info(f"Dados completos obtidos: {static_data.keys()}")
+    logging.debug(f"Número de colaboradores obtidos: {len(colaboradores)}")
+    
+    save_to_cache(cache_key, static_data)
+    
+    return static_data
+
+def get_canais_venda():
+    # Assumindo que os canais de venda são fixos
+    return ['VAREJO', 'SALÃO']
+
+def get_marcas_from_database():
+    query = """
+    SELECT DISTINCT marca 
+    FROM databeautykami.vw_distribuicao_item_pedidos 
+    ORDER BY marca
+    """
+    return query_athena(query)['marca'].tolist()
+
+def get_ufs_from_database():
+    query = """
+    SELECT DISTINCT uf_empresa_faturamento as uf
+    FROM databeautykami.vw_distribuicao_empresa_pedido
+    WHERE uf_empresa_faturamento IS NOT NULL AND uf_empresa_faturamento != ''
+    ORDER BY uf_empresa_faturamento
+    """
+    result = query_athena(query)
+    return result['uf'].tolist() if 'uf' in result.columns else []    
+
+def force_update_static_data():
+    logging.debug("Forçando atualização dos dados estáticos")
+    canais_venda = get_canais_venda()
+    marcas = get_marcas_from_database()
+    ufs = get_ufs_from_database()
+    equipes = get_team_options()
+    
+    static_data = {
+        'canais_venda': canais_venda,
+        'marcas': marcas,
+        'ufs': ufs,
+        'equipes': equipes
+    }
+    
+    save_to_cache('static_data', static_data)
+    logging.debug(f"Dados atualizados e salvos no cache: {static_data.keys()}")
+    return static_data
+
+def query_athena(query):
+    try:
+        conn = connect(s3_staging_dir=ATHENA_S3_STAGING_DIR, region_name=ATHENA_REGION)
+        df = pd.read_sql(query, conn)
+        logging.info(f"Query executada com sucesso. Resultado: {df.shape}")
+        return df
+    except Exception as e:
+        logging.error(f"Erro ao executar query no Athena: {str(e)}")
+        return pd.DataFrame()    
 
 # Funções cacheadas
 @st.cache_data
@@ -69,7 +173,7 @@ def get_colaboradores_cached(start_date, end_date, selected_channels, selected_u
     return get_colaboradores(start_date, end_date, selected_channels, selected_ufs)
 
 @st.cache_data
-def get_rfm_summary_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+def get_rfm_summary_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores,selected_teams):
     logging.info(f"Chamando get_rfm_summary_cached com os seguintes parâmetros:")
     logging.info(f"cod_colaborador: {cod_colaborador}")
     logging.info(f"start_date: {start_date}")
@@ -78,15 +182,15 @@ def get_rfm_summary_cached(cod_colaborador, start_date, end_date, selected_chann
     logging.info(f"selected_ufs: {selected_ufs}")
     logging.info(f"selected_colaboradores: {selected_colaboradores}")
     #logging.info(f"selected_colaboradores: {selected_teams}")
-    return get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
+    return get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores,selected_teams)
 
 @st.cache_data
-def get_rfm_heatmap_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
-    return get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores)
+def get_rfm_heatmap_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores,selected_teams):
+    return get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores,selected_teams)
 
 @st.cache_data
-def get_rfm_segment_clients_cached(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores):
-    return get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores)
+def get_rfm_segment_clients_cached(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores,selected_teams):
+    return get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores,selected_teams)
 
 @st.cache_data
 def load_filter_options(cod_colaborador, start_date, end_date):
@@ -128,21 +232,7 @@ def get_brand_options(start_date, end_date):
         logging.error(f"Erro ao obter opções de marca: {str(e)}")
         return []
 
-def query_athena(query):
-    try:
-        logging.info("Iniciando conexão com Athena")
-        conn = connect(s3_staging_dir=ATHENA_S3_STAGING_DIR, region_name=ATHENA_REGION)
-        cursor = conn.cursor()
-        logging.info("Executando query")
-        cursor.execute(query)
-        logging.info("Convertendo resultado para DataFrame")
-        df = as_pandas(cursor)
-        logging.info(f"Query executada com sucesso. Retornando DataFrame com {len(df)} linhas.")
-        return df
-    except Exception as e:
-        logging.error(f"Erro ao executar query no Athena: {str(e)}")
-        st.error(f"Erro ao executar query no Athena: {str(e)}")
-        return pd.DataFrame()
+
 
 def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
     # Inicialização de variáveis
@@ -336,8 +426,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
             LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
                 ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
             LEFT JOIN "databeautykami".tbl_distribuicao_bonificacao bonificacao
-                ON cast(bonificacao.cod_empresa as varchar) = empresa_pedido.cod_empresa_faturamento 
-                and date(bonificacao.mes_ref) = DATE_TRUNC('month', dt_faturamento)
+                ON date(bonificacao.mes_ref) = DATE_TRUNC('month', dt_faturamento)
             LEFT JOIN "databeautykami".tbl_varejo_marca marca ON marca.cod_marca = bonificacao.cod_marca
                 and upper(trim(marca.desc_abrev)) = upper(trim(item_pedidos.marca))
             WHERE
@@ -407,7 +496,6 @@ SELECT
                 Else ROUND(SUM(qtd * (custo_unitario/fator)) / NULLIF(SUM(qtd), 0), 2)  END custo_medio
             FROM "databeautykami".tbl_varejo_cmv left join "databeautykami".tbl_distribuicao_bonificacao
             ON tbl_varejo_cmv.cod_marca = tbl_distribuicao_bonificacao.cod_marca
-            and tbl_varejo_cmv.cod_empresa = cast(tbl_distribuicao_bonificacao.cod_empresa as varchar)
             and DATE_TRUNC('month', dt_faturamento) = date(tbl_distribuicao_bonificacao.mes_ref)
             GROUP BY 1, 2, 3, fator 
             UNION ALL 
@@ -575,7 +663,6 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
                 Else ROUND(SUM(qtd * (custo_unitario/fator)) / NULLIF(SUM(qtd), 0), 2)  END custo_medio
             FROM "databeautykami".tbl_varejo_cmv left join "databeautykami".tbl_distribuicao_bonificacao
                 ON tbl_varejo_cmv.cod_marca = tbl_distribuicao_bonificacao.cod_marca
-                and tbl_varejo_cmv.cod_empresa = cast(tbl_distribuicao_bonificacao.cod_empresa as varchar)
                 and DATE_TRUNC('month', dt_faturamento) = date(tbl_distribuicao_bonificacao.mes_ref)
                 LEFT JOIN "databeautykami".tbl_varejo_marca marca ON marca.cod_marca = tbl_varejo_cmv.cod_marca
                 GROUP BY 1, 2, 3, 4, fator 
@@ -622,22 +709,34 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
     logging.info(f"Query para dados de marca executada com sucesso. Retornando DataFrame com {len(df)} linhas.")
     return df
 
-@st.cache_data
-def get_team_options(start_date, end_date):
-    query = f"""
+@st.cache_data(ttl=24*60*60)
+def get_team_options():
+    logging.info("Iniciando get_team_options")
+    query = """
     SELECT DISTINCT empresa_pedido.equipes
-    FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
-    LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
-        ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
-    WHERE date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
-        AND empresa_pedido.equipes IS NOT NULL
-        AND empresa_pedido.equipes != ''
+    FROM "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+    WHERE empresa_pedido.equipes IS NOT NULL
+    AND empresa_pedido.equipes != ''
     ORDER BY empresa_pedido.equipes
     """
-    df = query_athena(query)
-    return df['equipes'].tolist() if not df.empty else []
+    logging.debug(f"Query para obter equipes: {query}")
+    
+    result = query_athena(query)
+    
+    if result.empty:
+        logging.warning("A query não retornou resultados para equipes")
+        return []
+    
+    if 'equipes' not in result.columns:
+        logging.error(f"Coluna 'equipes' não encontrada. Colunas disponíveis: {result.columns}")
+        return []
+    
+    teams = result['equipes'].tolist()
+    logging.info(f"Equipes obtidas: {teams}")
+    return teams
+  
 
-def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores,selected_teams):
     # Adicione a lógica para filtrar por selected_colaboradores
     colaborador_filter = ""
     if cod_colaborador:
@@ -656,7 +755,7 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
         ufs_str = "', '".join(selected_ufs)
         uf_filter = f"AND a.uf_empresa IN ('{ufs_str}')"
 
-    #team_filter = f"AND c.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""        
+    team_filter = f"AND b.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""        
 
     query = f"""
     WITH rfm_base AS (
@@ -677,6 +776,7 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
         {colaborador_filter}
         {channel_filter}
         {uf_filter}
+        {team_filter}
 
     ),
     rfm_scores AS (
@@ -745,7 +845,7 @@ def get_segmentos_query(segmentos):
         segmentos_str = ", ".join([f"'{seg}'" for seg in segmentos if seg != 'Todos'])
         return f"Segmento IN ({segmentos_str})"
 
-def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores):
+def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, selected_channels, selected_ufs, selected_colaboradores, selected_teams):
     logging.info(f"Iniciando get_rfm_segment_clients com os seguintes parâmetros:")
     logging.info(f"cod_colaborador: {cod_colaborador}")
     logging.info(f"start_date: {start_date}")
@@ -766,6 +866,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
     
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
+    team_filter = f"AND b.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
 
     query = f"""
     WITH rfm_base AS (
@@ -795,6 +896,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
         {colaborador_filter}
         {channel_filter}
         {uf_filter}
+        {team_filter}
     ),
     rfm_scores AS (
         SELECT
@@ -880,7 +982,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
         logging.error(f"Erro ao executar a query: {str(e)}")
         raise
 
-def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores):
+def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_colaboradores,selected_teams):
     if cod_colaborador or selected_colaboradores:
         colaborador_filter = ""
         if cod_colaborador:
@@ -894,7 +996,7 @@ def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channel
 
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
-    #team_filter = f"AND c.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
+    team_filter = f"AND b.equipes IN ('{', '.join(selected_teams)}')" if selected_teams else ""
 
     query = f"""
     WITH rfm_base AS (
@@ -910,6 +1012,7 @@ def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channel
         {colaborador_filter}
         {channel_filter}
         {uf_filter}
+        {team_filter}
   
     ),
     rfm_scores AS (
@@ -1070,6 +1173,34 @@ def get_colaboradores(start_date, end_date, selected_channels=None, selected_ufs
     """
     
     return query_athena(query)
+
+@st.cache_data(ttl=24*60*60)
+def get_colaboradores_options():
+    logging.info("Iniciando get_colaboradores_options")
+    query = """
+    SELECT DISTINCT
+        empresa_pedido.nome_colaborador_atual as nome_colaborador
+    FROM "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+    WHERE empresa_pedido.nome_colaborador_atual IS NOT NULL
+    AND empresa_pedido.nome_colaborador_atual != ''
+    ORDER BY
+        empresa_pedido.nome_colaborador_atual
+    """
+    logging.debug(f"Query para obter colaboradores: {query}")
+    
+    result = query_athena(query)
+    
+    if result.empty:
+        logging.warning("A query não retornou resultados para colaboradores")
+        return []
+    
+    if 'nome_colaborador' not in result.columns:
+        logging.error(f"Coluna 'nome_colaborador' não encontrada. Colunas disponíveis: {result.columns}")
+        return []
+    
+    colaboradores = result['nome_colaborador'].tolist()
+    logging.info(f"Número de colaboradores obtidos: {len(colaboradores)}")
+    return colaboradores
 
 def get_client_status(start_date, end_date, cod_colaborador, selected_channels, selected_ufs, selected_nome_colaborador, selected_brands,selected_teams):
 

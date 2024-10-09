@@ -9,6 +9,8 @@ services:
       - proxy
     env_file:
       - .env
+    volumes:
+      - ./data:/app/data
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.streamlit.rule=Host(`databeauty.aws.kamico.com.br`)"

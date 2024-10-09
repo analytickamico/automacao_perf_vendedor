@@ -1,57 +1,151 @@
-# login.py
 import streamlit as st
-import pandas as pd
-from session_state_manager import reset_session_state,init_session_state
+import sqlite3
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+import os
+from dotenv import load_dotenv
+import logging
+import json
+from session_state_manager import init_session_state, is_user_logged_in, save_credentials, clear_credentials
+from google.auth.transport.requests import Request
+from auth_utils import refresh_token_if_expired, get_user_info, get_user_role, with_valid_credentials, check_authentication
 
-# Dados dos usuários (hard-coded) - substituir apos poc por usuário banco
-users = pd.DataFrame({
-    'username': ['admin', 'gestor', 'vendedor','cris_ops','gestor_comercial','romulo'],
-    'nome': ['Administrador', 'Gestor', 'Vendedor','Cristina Berlanga','Patrick','Romulo Amaro'],
-    'password': ['admin123', 'gestor123', 'vendedor123','dados@2024','comercial@2024','distribuicao@2024'],
-    'email': ['admin@example.com', 'gestor@example.com', 'guilherme@kamico.com.br','guilherme@kamico.com.br','guilherme@kamico.com.br','romulo.amaro@kamico.com.br'],
-    'role': ['admin', 'gestor', 'vendedor','admin','gestor','gestor'],
-    'cod_colaborador': ['', '', '15','','','']
-})
+logging.basicConfig(level=logging.DEBUG)
+
+
+# Carrega as variáveis de ambiente do arquivo .env
+load_dotenv()
+
+logging.debug(f"GOOGLE_CLIENT_ID: {os.getenv('GOOGLE_CLIENT_ID')}")
+logging.debug(f"OAUTH_REDIRECT_URI: {os.getenv('OAUTH_REDIRECT_URI')}")
+
+# Configurações do OAuth
+CLIENT_CONFIG = {
+    "web": {
+        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+        "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "redirect_uris": [os.getenv("OAUTH_REDIRECT_URI","http://localhost:8501")],
+        "javascript_origins": ["http://localhost:8501", "https://www.databeauty.aws.kamico.com.br"]
+    }
+}
+
+SCOPES = [
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+    'openid'
+]
+
+# Configuração do SQLite
+DB_PATH = os.getenv("DB_PATH", "/app/data/users.db")
+
+
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (id INTEGER PRIMARY KEY, email TEXT UNIQUE, name TEXT, role TEXT)''')
+    
+    # Garantir que o usuário Admin existe
+    admin_email = os.getenv("ADMIN_EMAIL", "guilherme@kamico.com.br")
+    c.execute("INSERT OR IGNORE INTO users (email, name, role) VALUES (?, ?, ?)",
+              (admin_email, 'Admin', 'admin'))
+    conn.commit()
+    conn.close()
+
+def handle_oauth_callback():
+    logging.debug("Iniciando handle_oauth_callback")
+    flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
+    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8501")
+    
+    if 'code' in st.query_params:
+        try:
+            logging.debug(f"Código de autorização recebido: {st.query_params['code']}")
+            flow.fetch_token(code=st.query_params['code'])
+            credentials = flow.credentials
+            st.session_state['credentials'] = credentials.to_json()
+            logging.info("Autenticação bem-sucedida")
+            return True
+        except Exception as e:
+            logging.error(f"Erro na autenticação: {str(e)}")
+            st.error(f"Erro na autenticação: {str(e)}")
+            st.session_state['credentials'] = None
+            return False
+    else:
+        logging.warning("Nenhum código de autorização recebido")
+        return False    
 
 def login():
+    init_session_state()
+    logging.debug(f"Estado da sessão no início do login: {st.session_state}")
     st.title("Login")
-    username = st.text_input("Usuário")
-    password = st.text_input("Senha", type="password")
+
+    if 'credentials' in st.session_state and st.session_state['credentials']:
+        try:
+            credentials = Credentials.from_authorized_user_info(json.loads(st.session_state['credentials']))
+            if refresh_token_if_expired(credentials):
+                email, name = get_user_info(credentials)
+                role = get_user_role(email)
+
+                if role:
+                    st.success(f"Logado como {name} ({email})")
+                    st.session_state['logged_in'] = True
+                    st.session_state['user'] = {
+                        'email': email,
+                        'name': name,
+                        'role': role
+                    }
+                    return True
+                else:
+                    st.error("Usuário não autorizado. Entre em contato com o administrador.")
+            else:
+                st.warning("Sessão expirada. Por favor, faça login novamente.")
+        except Exception as e:
+            logging.error(f"Erro ao processar as credenciais: {str(e)}")
+            st.error("Erro ao processar as credenciais. Por favor, faça login novamente.")
+        
+        # Se chegamos aqui, algo deu errado com as credenciais existentes
+        st.session_state['credentials'] = None
+        st.session_state['logged_in'] = False
+
+    # Se não há credenciais ou se elas foram limpadas, inicie o fluxo de login
+    if 'code' in st.query_params:
+        if handle_oauth_callback():
+            st.rerun()
     
-    if st.button("Login"):
-        user = users[(users['username'] == username) & (users['password'] == password)]
-        if not user.empty:
-            user_data = user.iloc[0].to_dict()
-            st.success(f"Logado como {user_data['nome']}")
-            st.session_state['logged_in'] = True
-            st.session_state['user'] = {
-                'username': username,
-                'role': user_data['role'],
-                'cod_colaborador': user_data.get('cod_colaborador', ''),
-                'nome': user_data['nome']
-            }
-            st.write(f"Debug: Nome armazenado na sessão: {st.session_state['user']['nome']}")
-            return True
+    flow = Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES)
+    flow.redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8501")
+    authorization_url, _ = flow.authorization_url(prompt='consent')
+
+    st.write("Por favor, faça login com sua conta Google")
+    if st.button("Login com Google"):
+        st.markdown(f"[Clique aqui para fazer login]({authorization_url})")
+
     return False
 
 def logout():
-    # Lista de chaves que queremos manter
-    keys_to_keep = ['logout_requested']
-    
-    # Armazenar temporariamente os valores das chaves que queremos manter
-    temp_storage = {key: st.session_state[key] for key in keys_to_keep if key in st.session_state}
-    
-    # Limpar o session_state
-    st.session_state.clear()
-    
-    # Restaurar as chaves que queremos manter
-    for key, value in temp_storage.items():
-        st.session_state[key] = value
-    
-    # Definir explicitamente as chaves necessárias
-    st.session_state['logged_in'] = False
+    clear_credentials()
     st.session_state['user'] = None
-    st.session_state['logout_requested'] = True
-    
-    # Exibir mensagem de logout
-    st.write("### Você foi desconectado. Por favor, recarregue a página manualmente. ⌨️")
+    st.success("Você foi desconectado. Por favor, recarregue a página.")
+
+def main():
+    init_session_state()
+    init_db()
+
+    if 'logged_in' not in st.session_state:
+        st.session_state['logged_in'] = False
+
+    if not st.session_state['logged_in']:
+        if login():
+            st.rerun()
+    else:
+        st.write(f"Bem-vindo, {st.session_state['user']['name']}!")
+        if st.button("Logout"):
+            logout()
+            st.rerun()
+
+if __name__ == "__main__":
+    main()
