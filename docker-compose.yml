@@ -11,6 +11,9 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+      - ~/.aws:/root/.aws:ro  # Montando as credenciais da AWS
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1  # Substitua pela sua região
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.streamlit.rule=Host(`databeauty.aws.kamico.com.br`)"
