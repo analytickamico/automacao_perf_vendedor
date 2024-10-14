@@ -90,7 +90,7 @@ def classify_giro(giro):
         return 'Baixo'
 
 def calculate_giro_and_coverage(df, dias_periodo):
-    # Evitar divisão por zero
+    # Evitar divisão por zero e valores muito pequenos
     df['giro_anual'] = np.where(
         df['saldo_estoque'] > 0,
         (df['quantidade_vendida'] / df['saldo_estoque']) * (365 / dias_periodo),
@@ -99,11 +99,11 @@ def calculate_giro_and_coverage(df, dias_periodo):
     # Limitar giro anual a um máximo razoável (por exemplo, 52, que seria um giro semanal)
     df['giro_anual'] = df['giro_anual'].clip(upper=52)
     
-    # Calcular cobertura
+    # Calcular cobertura com um limite superior
     df['cobertura_dias'] = np.where(
         df['giro_anual'] > 0,
-        365 / df['giro_anual'],
-        float('inf')  # Use infinito para itens sem giro
+        np.minimum(365 / df['giro_anual'], 365 * 5),  # Limitando a 5 anos
+        365 * 5  # Para itens sem giro, assumimos 5 anos de cobertura
     )
     
     return df
@@ -168,7 +168,6 @@ def main():
             
 
 
-            # Calcular giro e cobertura para stock_data
             dias_periodo = 90  # Assumindo um período de 90 dias para o cálculo
             stock_data = calculate_giro_and_coverage(stock_data, dias_periodo)
 
@@ -176,7 +175,9 @@ def main():
             total_itens_estoque = stock_data['saldo_estoque'].sum()
             valor_total_estoque = stock_data['valor_total_estoque'].sum()
             giro_medio = stock_data['giro_anual'].mean()
-            cobertura_media = stock_data['cobertura_dias'].median()  # Usando mediana para evitar influência de outliers
+            
+            # Calcular cobertura média usando uma abordagem mais robusta
+            cobertura_media = np.percentile(stock_data['cobertura_dias'], 50)  # Mediana
             
             logging.info(f"Giro médio calculado: {giro_medio}")
             logging.info(f"Cobertura média calculada: {cobertura_media}")
