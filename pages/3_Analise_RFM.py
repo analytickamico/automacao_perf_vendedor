@@ -79,12 +79,19 @@ def load_filters():
         default=st.session_state.get('selected_brands', [])
     )
 
-    if user_role not in ['admin', 'gestor']:
-        st.session_state.selected_teams = st.sidebar.multiselect(
-            "Equipes", 
-            options=st.session_state.filter_options['equipes'],
-            default=st.session_state.get('selected_teams', [])
-        )
+    logging.info(f"Papel do usuário: {user_role}")
+    if user_role in ['admin', 'gestor']:
+        logging.info("Usuário é admin ou gestor, exibindo filtro de equipes")
+        equipes_options = st.session_state.filter_options['equipes']
+        if equipes_options:
+            st.session_state.selected_teams = st.sidebar.multiselect(
+                "Equipes", 
+                options=equipes_options,
+                default=st.session_state.get('selected_teams', [])
+            )
+            logging.info(f"Equipes selecionadas: {st.session_state.selected_teams}")
+        else:
+            logging.warning("Nenhuma opção de equipe disponível para exibição")
         
         st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
         
@@ -136,15 +143,6 @@ def load_data():
             logging.error(traceback.format_exc())
 
         st.session_state['last_segmentos'] = []
-
-def create_dashboard():
-    if 'rfm_summary' in st.session_state and 'heatmap_data' in st.session_state:
-        create_dashboard_content(
-            st.session_state['rfm_summary'],
-            st.session_state['heatmap_data']
-        )
-    else:
-        st.warning("Nenhum dado carregado. Por favor, escolha os filtros e acione Atualizar Dados.")          
 
 def create_dashboard():
     if 'rfm_summary' in st.session_state and 'heatmap_data' in st.session_state:

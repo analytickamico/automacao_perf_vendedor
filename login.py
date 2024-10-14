@@ -154,7 +154,7 @@ def logout():
     st.session_state['user'] = None
     st.session_state['logged_in'] = False
     st.success("Você foi desconectado.")
-    st.experimental_rerun()  # Forçar recarregamento da página para refletir o estado de logout
+    st.rerun()  # Forçar recarregamento da página para refletir o estado de logout
 
 
 def main():
