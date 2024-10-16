@@ -73,11 +73,40 @@ def load_filters():
         default=st.session_state.get('selected_ufs', [])
     )
     
-    st.session_state.selected_brands = st.sidebar.multiselect(
-        "Marcas", 
-        options=st.session_state.filter_options['brands'],
-        default=st.session_state.get('selected_brands', [])
-    )
+    all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=True)
+
+    with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
+        if all_brands_selected:
+            default_brands = st.session_state.filter_options['brands']
+        else:
+            default_brands = st.session_state.get('selected_brands', [])
+
+        # Multiselect para marcas com opção de exclusão
+        selected_brands = st.multiselect(
+            "Marcas (desmarque para excluir)",
+            options=st.session_state.filter_options['brands'],
+            default=default_brands
+        )
+
+    # Atualizar as marcas selecionadas
+    if all_brands_selected:
+        st.session_state.selected_brands = [brand for brand in selected_brands if brand is not None]
+        excluded_brands = [brand for brand in st.session_state.filter_options['brands'] if brand not in selected_brands and brand is not None]
+    else:
+        st.session_state.selected_brands = [brand for brand in selected_brands if brand is not None]
+        excluded_brands = []
+
+    # Exibir marcas selecionadas ou excluídas
+    if all_brands_selected:
+        if excluded_brands:
+            st.sidebar.write(f"Marcas excluídas: {', '.join(excluded_brands)}")
+        else:
+            st.sidebar.write("Todas as marcas estão selecionadas")
+    #else:
+        #if st.session_state.selected_brands:
+            #st.sidebar.write(f"Marcas selecionadas: {', '.join(st.session_state.selected_brands)}")
+        #else:
+            #st.sidebar.write("Nenhuma marca selecionada")
 
     logging.info(f"Papel do usuário: {user_role}")
     if user_role in ['admin', 'gestor']:

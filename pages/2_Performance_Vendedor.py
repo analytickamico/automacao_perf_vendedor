@@ -181,11 +181,43 @@ def load_filters():
     )
     
     # Usar dados estáticos para marcas
-    st.session_state.selected_brands = st.sidebar.multiselect(
-        "Marcas", 
-        options=st.session_state.filter_options['brands'],
-        default=st.session_state.get('selected_brands', [])
-    )
+    #st.session_state.selected_brands = st.sidebar.multiselect(
+        #"Marcas", 
+        #options=st.session_state.filter_options['brands'],
+        #default=st.session_state.get('selected_brands', [])
+    #)
+    # Opção para selecionar todas as marcas
+    all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
+
+    with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
+        if all_brands_selected:
+            default_brands = st.session_state.filter_options['brands']
+        else:
+            default_brands = st.session_state.get('selected_brands', [])
+
+        # Multiselect para marcas com opção de exclusão
+        selected_brands = st.multiselect(
+            "Marcas (desmarque para excluir)",
+            options=st.session_state.filter_options['brands'],
+            default=default_brands
+        )
+
+    # Atualizar as marcas selecionadas
+    if all_brands_selected:
+        st.session_state.selected_brands = [brand for brand in selected_brands if brand is not None]
+        excluded_brands = [brand for brand in st.session_state.filter_options['brands'] if brand not in selected_brands and brand is not None]
+    else:
+        st.session_state.selected_brands = [brand for brand in selected_brands if brand is not None]
+        excluded_brands = []
+
+    # Exibir marcas selecionadas ou excluídas
+    if all_brands_selected:
+        if excluded_brands:
+            st.sidebar.write(f"Marcas excluídas: {', '.join(excluded_brands)}")
+        else:
+            st.sidebar.write("Todas as marcas estão selecionadas")
+
+
     logging.info(f"Papel do usuário: {user_role}")
     if user_role in ['admin', 'gestor']:
         logging.info("Usuário é admin ou gestor, exibindo filtro de equipes")
@@ -734,7 +766,7 @@ def main():
     st.set_page_config(page_title="Performance de Vendas", layout="wide", page_icon=ico_path)
 
     try:
-        st.sidebar.title('Configurações do Dashboard')
+        st.sidebar.title('Filtros')
         load_filters()  # Esta função agora inclui o botão "Atualizar Dados"
 
         create_dashboard()  # Esta função deve usar os dados carregados em st.session_state
