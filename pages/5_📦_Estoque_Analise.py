@@ -33,8 +33,17 @@ def initialize_session_state():
             'channels': [],
             'ufs': [],
             'brands': [],
-            'empresas': []  # Adicionando empresas aqui
+            'empresas': []
         }
+    if 'static_data' not in st.session_state:
+        st.session_state.static_data = get_static_data()
+    
+    # Garantir que não haja valores None nas marcas
+    st.session_state.filter_options['brands'] = [brand for brand in st.session_state.static_data.get('marcas', []) if brand is not None]
+
+    # Inicializar selected_brands se não existir
+    if 'selected_brands' not in st.session_state:
+        st.session_state.selected_brands = st.session_state.filter_options['brands'].copy()
     if 'selected_channels' not in st.session_state:
         st.session_state.selected_channels = []
     if 'selected_ufs' not in st.session_state:
@@ -65,28 +74,41 @@ def load_filters():
     st.sidebar.header("Filtros")
     
     # Filtro de marcas
+    # Checkbox para selecionar todas as marcas
+    # Checkbox para selecionar todas as marcas
     all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
+
+    # Expander para marcas específicas
     with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
+        # Se todas as marcas forem selecionadas, marque todas as opções
         if all_brands_selected:
             default_brands = st.session_state.filter_options['brands']
         else:
+            # Caso contrário, use a lista de marcas selecionadas anteriormente
             default_brands = st.session_state.get('selected_brands', [])
 
+        # Filtro de marcas
         selected_brands = st.multiselect(
             "Marcas (desmarque para excluir)",
             options=st.session_state.filter_options['brands'],
             default=default_brands
         )
 
+    # Atualização do estado com as marcas selecionadas ou todas
     if all_brands_selected:
-        st.session_state.selected_brands = [brand for brand in selected_brands if brand is not None]
-        excluded_brands = [brand for brand in st.session_state.filter_options['brands'] if brand not in selected_brands and brand is not None]
+        # Se todas as marcas forem selecionadas, seleciona todas as marcas
+        st.session_state.selected_brands = st.session_state.filter_options['brands']
     else:
-        st.session_state.selected_brands = [brand for brand in selected_brands if brand is not None]
-        excluded_brands = []
+        # Atualiza com base no que foi selecionado
+        st.session_state.selected_brands = selected_brands
+
+    # Excluir as marcas que não foram selecionadas
+    excluded_brands = [brand for brand in st.session_state.filter_options['brands'] if brand not in st.session_state.selected_brands]
 
     # Filtro de empresas
     all_empresas_selected = st.sidebar.checkbox("Selecionar Todas as Empresas", value=False)
+
+    # Expander para empresas específicas
     with st.sidebar.expander("Selecionar/Excluir Empresas Específicas", expanded=False):
         if all_empresas_selected:
             default_empresas = st.session_state.filter_options['empresas']
@@ -99,10 +121,12 @@ def load_filters():
             default=default_empresas
         )
 
+    # Atualização do estado com as empresas selecionadas ou todas
     if all_empresas_selected:
         st.session_state.selected_empresas = st.session_state.filter_options['empresas']
     else:
         st.session_state.selected_empresas = selected_empresas
+
 
     # Botões de atualização e limpeza de cache
     if st.sidebar.button("Atualizar Dados"):

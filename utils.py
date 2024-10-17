@@ -277,15 +277,20 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
     brand_filter = ""
     empresa_filter = ""
     empresa_filter_stock = ""
+    brand_filter_stock = ""
 
+        # Filtro de marcas
     if selected_brands:
         brands_str = "', '".join(selected_brands)
-        brand_filter = f"AND item_pedidos.marca IN ('{brands_str}')"
-
+        brand_filter = format_filter(selected_brands, "item_pedidos.marca") 
+        brand_filter_stock = format_filter(selected_brands, "e.marca") 
+    
+    # Filtro de empresas
     if selected_empresas:
-        empresas_str = "', '".join(selected_empresas)
+        empresas_str = "', '".join([str(empresa) for empresa in selected_empresas if empresa is not None])
         empresa_filter = format_filter(selected_empresas, "empresa_pedido.nome_empresa_faturamento")    
-        empresa_filter_stock = format_filter(selected_empresas, "e.empresa")        
+        empresa_filter_stock = format_filter(selected_empresas, "e.empresa")    
+
 
 
     logging.info(f"Chamada get_stock_data com filtros: channels={selected_channels}, ufs={selected_ufs}, brands={selected_brands}, empresas={selected_empresas}")       
@@ -368,6 +373,7 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
         bonificacao b ON upper(e.cod_produto) = b.cod_produto and e.cod_empresa = b.cod_empresa        
     WHERE e.saldo_estoque > 0 and e.cod_empresa not in ('9','21','5')
     {empresa_filter_stock}
+    {brand_filter_stock}
     GROUP BY 1,2,3,4,6,7,8,9,10,11,12,13,14
     """
     logging.info(f"Executando query para get_stock_data: {query}")
@@ -505,12 +511,9 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
     colaborador_filter = ""
     empresa_filter = ""
     empresa_filter_stock = ""
+    brand_filter_stock = ""
 
-    # Filtros (mesma lógica da função original)
-    if selected_brands:
-        brands_str = "', '".join(selected_brands)
-        brand_filter = f"AND item_pedidos.marca IN ('{brands_str}')"
-    
+    # Filtros (mesma lógica da função original)    
     if selected_channels:
         channels_str = "', '".join(selected_channels)
         channel_filter = f"AND pedidos.canal_venda IN ('{channels_str}')"
@@ -532,7 +535,12 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
     if selected_empresas:
         empresas_str = "', '".join(selected_empresas)
         empresa_filter = format_filter(selected_empresas, "empresa_pedido.nome_empresa_faturamento") 
-        empresa_filter_stock = format_filter(selected_empresas, "e.empresa")       
+        empresa_filter_stock = format_filter(selected_empresas, "e.empresa")    
+
+    if selected_brands:
+        brands_str = "', '".join(selected_brands)
+        brand_filter = format_filter(selected_brands, "item_pedidos.marca") 
+        brand_filter_stock = format_filter(selected_brands, "e.marca")           
 
     #empresa_filter = f"AND empresa_pedido.empresa IN ({','.join([f"'{e}'" for e in selected_empresas])})" if selected_empresas else ""        
 
@@ -617,6 +625,7 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
         "databeautykami"."tbl_varejo_saldo_estoque" e
       WHERE saldo_estoque > 0 and cod_empresa not in ('9','21','5')
       {empresa_filter_stock}
+      {brand_filter_stock}
 
       GROUP BY
         cod_produto,marca
