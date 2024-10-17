@@ -164,6 +164,26 @@ def main():
 
     st.title("Análise de Estoque 📦")
 
+    # Texto explicativo
+    with st.expander("Clique aqui para ver as premissas da análise"):
+        st.markdown("""
+                ### Regras de negócio utilizadas na análise de etoque:  
+                      
+                - A base de venda de referência é dos últimos 90 dias.
+                - Os nops considerados em bonificação são :  
+                        .BONIFICADO,  
+                        .BONIFICADO STORE,  
+                        .BONIFICADO FORA DO ESTADO,  
+                        .REMESSA EM BONIFICAÇÃO,  
+                        .BRINDE OU DOAÇÃO,  
+                        .BRINDE,  
+                        .CAMPANHA,  
+                        .PROMOCAO   
+                (*Todos estes nop tem cfop de bonificação 5.910 e 6.910*)                
+                - Todos os produtos são considerados no estoque, incluive material de apoio, 
+                    desde que tenham saldo maior que zero.
+                """)
+
     try:
         progress_text = "Carregando filtros. Aguarde..."
         my_bar = st.progress(0, text=progress_text)
@@ -378,7 +398,14 @@ def main():
                 ), unsafe_allow_html=True)                                                                                    
 
                 # Agregação dos dados por produto
-                aggregated_data = stock_data.groupby(['cod_produto','desc_produto','marca']).agg({
+                aggregated_data_aux = stock_data.groupby(['cod_produto','desc_produto','empresa','marca']).agg({
+                    venda_col: 'max',
+                    bonificacao_col: 'max',
+                    'saldo_estoque': 'sum',
+                    'valor_total_estoque': 'sum'
+                }).reset_index()
+
+                aggregated_data = aggregated_data_aux.groupby(['cod_produto','desc_produto','marca']).agg({
                     venda_col: 'sum',
                     bonificacao_col: 'sum',
                     'saldo_estoque': 'sum',
@@ -388,7 +415,7 @@ def main():
                 # Top 10 produtos mais vendidos e bonificados
             top_10_vendidos = aggregated_data.nlargest(20, venda_col)
             top_10_bonificados = aggregated_data.nlargest(20, bonificacao_col)
-
+            
             # Gráfico comparativo de barras para os top 10 produtos vendidos e bonificados
             # Concatenando e eliminando duplicatas
             top_10_combined = pd.concat([top_10_vendidos, top_10_bonificados]).drop_duplicates(subset=['cod_produto'])
@@ -602,7 +629,7 @@ def main():
                 st.metric(
                     label="Cobertura Média dos Críticos",
                     value=f"{cobertura_media_criticos:.0f} dias",
-                    delta=f"{cobertura_media_criticos - abc_data['cobertura_dias'].median():.0f} dias vs média geral",
+                    #delta=f"{cobertura_media_criticos - abc_data['cobertura_dias'].median():.0f} dias vs média geral",
                     delta_color="inverse"
                 )
 
@@ -619,12 +646,13 @@ def main():
                     st.markdown('<div class="custom-dataframe-container">', unsafe_allow_html=True)
                     excess_stock_menor = abc_data[abc_data['cobertura_dias'] < 90].sort_values('cobertura_dias', ascending=False)
                     st.dataframe(
-                        excess_stock_menor[['sku', 'nome_produto', 'marca', 'saldo_estoque', 'valor_estoque', 'giro_anual', 'cobertura_dias']]
+                        excess_stock_menor[['sku', 'nome_produto', 'marca', 'saldo_estoque', 'valor_estoque', 'giro_anual', 'cobertura_dias','quantidade_vendida']]
                         .style.format({
                             'saldo_estoque': '{:,.0f}',
                             'valor_estoque': 'R$ {:,.2f}',
                             'giro_anual': '{:.2f}',
-                            'cobertura_dias': '{:.0f}'
+                            'cobertura_dias': '{:.0f}',
+                            'quantidade_vendida': '{:.0f}'
                         }),
                         hide_index=True,
                         use_container_width=True
@@ -640,12 +668,13 @@ def main():
                     st.markdown('<div class="custom-dataframe-container">', unsafe_allow_html=True)
                     excess_stock_maior = abc_data[abc_data['cobertura_dias'] > 90].sort_values('cobertura_dias', ascending=False)
                     st.dataframe(
-                        excess_stock_maior[['sku', 'nome_produto', 'marca', 'saldo_estoque', 'valor_estoque', 'giro_anual', 'cobertura_dias']]
+                        excess_stock_maior[['sku', 'nome_produto', 'marca', 'saldo_estoque', 'valor_estoque', 'giro_anual', 'cobertura_dias','quantidade_vendida']]
                         .style.format({
                             'saldo_estoque': '{:,.0f}',
                             'valor_estoque': 'R$ {:,.2f}',
                             'giro_anual': '{:.2f}',
-                            'cobertura_dias': '{:.0f}'
+                            'cobertura_dias': '{:.0f}',
+                            'quantidade_vendida': '{:.0f}'
                         }),
                         hide_index=True,
                         use_container_width=True
@@ -654,7 +683,16 @@ def main():
 
             # Identificar produtos sem vendas
             # Passo 1: Agrupamento e agregação dos dados
-            produtos_agrupados = stock_data.groupby('cod_produto').agg({
+            produtos_agrupados_aux = stock_data.groupby(['cod_produto','empresa']).agg({
+                'desc_produto': 'first',
+                'marca': 'first',
+                'saldo_estoque': 'sum',
+                'valor_total_estoque': 'sum',
+                'quantidade_vendida': 'max',
+                'quantidade_bonificada': 'max'
+                }).reset_index()
+            
+            produtos_agrupados = produtos_agrupados_aux.groupby('cod_produto').agg({
                 'desc_produto': 'first',
                 'marca': 'first',
                 'saldo_estoque': 'sum',

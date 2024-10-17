@@ -105,8 +105,8 @@ def get_empresas_from_database():
     query = """
     SELECT DISTINCT nome_empresa_faturamento as empresa 
     FROM "databeautykami".vw_distribuicao_empresa_pedido 
-    WHERE empresa.cod_empresa_faturamento not in ('9','21')
-    ORDER BY empresa
+    WHERE cod_empresa_faturamento not in ('9','21','5')
+    ORDER BY 1
     """
     empresas = query_athena(query)['empresa'].tolist()
     logging.info(f"Empresas obtidas do banco de dados: {empresas}")
@@ -334,7 +334,7 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
             LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
                 ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
             WHERE
-                upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO,BRINDE OU DOAÇÃO')
+                upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO','BRINDE OU DOAÇÃO','BRINDE','CAMPANHA','PROMOCAO')
                 AND pedidos.operacoes_internas = 'N'
                 AND date(dt_faturamento) BETWEEN date('{start_date}') AND date('{end_date}')
                 AND empresa_pedido.cod_empresa_faturamento not in ('9','21','5')
@@ -581,7 +581,7 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
             LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
                 ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
             WHERE
-                upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO,BRINDE OU DOAÇÃO')
+                upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO','BRINDE OU DOAÇÃO','BRINDE','CAMPANHA','PROMOCAO')
                 AND pedidos.operacoes_internas = 'N'
                 AND date(dt_faturamento) BETWEEN date('{start_date}') AND date('{end_date}')
                 AND empresa_pedido.cod_empresa_faturamento not in ('9','21','5')
@@ -858,7 +858,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
             LEFT JOIN "databeautykami".tbl_varejo_marca marca ON marca.cod_marca = bonificacao.cod_marca
                 and upper(trim(marca.desc_abrev)) = upper(trim(item_pedidos.marca))
             WHERE
-                upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO,BRINDE OU DOAÇÃO')
+                upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO','BRINDE OU DOAÇÃO','BRINDE','CAMPANHA','PROMOCAO')
                 AND pedidos.operacoes_internas = 'N'
                 {colaborador_filter}
                 {channel_filter}
