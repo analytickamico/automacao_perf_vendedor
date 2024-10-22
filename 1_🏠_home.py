@@ -3,6 +3,10 @@ import logging
 from login import login, logout
 from session_state_manager import init_session_state, load_page_specific_state, ensure_cod_colaborador
 
+st.markdown('''
+    <meta http-equiv="X-Frame-Options" content="ALLOW-FROM https://sites.google.com/">
+    <meta http-equiv="Content-Security-Policy" content="frame-ancestors 'self' https://sites.google.com">
+''', unsafe_allow_html=True)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -29,9 +33,12 @@ def show_home_content():
 
 def main():
     logging.info("Iniciando a aplicação")
+
     init_session_state()
     load_page_specific_state("Home")
     ensure_cod_colaborador()
+
+
     
     if st.session_state.get('logout_requested', False):
         st.session_state['logout_requested'] = False

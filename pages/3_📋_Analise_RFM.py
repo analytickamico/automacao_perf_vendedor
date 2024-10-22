@@ -18,6 +18,8 @@ current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 ico_path = os.path.join(parent_dir, "favicon.ico")
 
+def format_currency_br(value):
+    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def initialize_session_state():
     if 'filter_options' not in st.session_state:
@@ -58,8 +60,8 @@ def load_filters():
     st.session_state.filter_options['equipes'] = static_data.get('equipes', [])
     st.session_state.filter_options['colaboradores'] = static_data.get('colaboradores', [])
 
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
+    #st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
+    #st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
     
     st.session_state.selected_channels = st.sidebar.multiselect(
         "Canais de Venda", 
@@ -73,7 +75,7 @@ def load_filters():
         default=st.session_state.get('selected_ufs', [])
     )
     
-    all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=True)
+    all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
 
     with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
         if all_brands_selected:
@@ -102,11 +104,6 @@ def load_filters():
             st.sidebar.write(f"Marcas excluídas: {', '.join(excluded_brands)}")
         else:
             st.sidebar.write("Todas as marcas estão selecionadas")
-    #else:
-        #if st.session_state.selected_brands:
-            #st.sidebar.write(f"Marcas selecionadas: {', '.join(st.session_state.selected_brands)}")
-        #else:
-            #st.sidebar.write("Nenhuma marca selecionada")
 
     logging.info(f"Papel do usuário: {user_role}")
     if user_role in ['admin', 'gestor']:
@@ -192,9 +189,12 @@ def create_dashboard_content(rfm_summary, heatmap_data):
     else:
         st.warning("Não há dados para criar o mapa de calor RFM. Verifique os filtros aplicados.")
 
+
     if rfm_summary is not None and not rfm_summary.empty:
         # Calcular o Ticket Médio
         rfm_summary['Ticket_Medio'] = rfm_summary['Valor_Medio'] / rfm_summary['Positivacoes_Media']
+        rfm_summary['Ticket_Medio'] = rfm_summary['Valor_Medio'] / rfm_summary['Positivacoes_Media']
+    
 
         # Selecionar apenas as colunas desejadas
         columns_to_display = ['Segmento','Canal_Venda','Regiao','Numero_Clientes', 'Valor_Total', 'Valor_Medio', 'Recencia_Media', 'Positivacoes_Media', 'Ticket_Medio']
@@ -202,12 +202,12 @@ def create_dashboard_content(rfm_summary, heatmap_data):
 
         st.subheader("Segmentação dos Clientes RFM")
         st.dataframe(rfm_summary_display.style.format({
-            'Numero_Clientes': '{:,.0f}',
-            'Valor_Total': 'R$ {:,.2f}',
-            'Valor_Medio': 'R$ {:,.2f}',
-            'Recencia_Media': '{:.2f}',
-            'Positivacoes_Media': '{:.2f}',
-            'Ticket_Medio': 'R$ {:,.2f}'  # Formatação para o novo Ticket Médio
+            'Numero_Clientes': '{:,.0f}',  # Formatação padrão para número inteiro
+            'Valor_Total': format_currency_br,  # Usa a função formatadora
+            'Valor_Medio': format_currency_br,  # Usa a função formatadora
+            'Recencia_Media': '{:.2f}',  # Formatação padrão para número com duas casas decimais
+            'Positivacoes_Media': '{:.2f}',  # Formatação padrão para número com duas casas decimais
+            'Ticket_Medio': format_currency_br  # Usa a função formatadora
         }))
 
         #segmentos_rfm = ['Todos'] + rfm_summary_display['Segmento'].unique().tolist()
@@ -276,7 +276,7 @@ Segmentação dos Clientes:
                 st.session_state['clientes_segmento'] = clientes_segmento
                 st.session_state['data_needs_update'] = False
         else:
-            clientes_segmento = st.session_state['clientes_segmento']
+            clientes_segmento = st.session_state['clientes_segmento']     
 
         if clientes_segmento is not None and not clientes_segmento.empty:
             # Aplicar o filtro de inadimplentes, se necessário
@@ -297,14 +297,16 @@ Segmentação dos Clientes:
                     elif isinstance(value, str):
                         return value
                     else:
-                        return f"R$ {value:,.2f}"
+                        # Formata o número no estilo americano, depois substitui vírgulas por pontos e pontos por vírgulas
+                        return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 
                 # Formatação das colunas monetárias
                 for col in ['Monetario', 'ticket_medio_posit', 'vlr_inadimplente']:
                     clientes_filtrados[col] = clientes_filtrados[col].apply(format_currency)
 
                 # Exibição do DataFrame
-                st.dataframe(clientes_filtrados[['Cod_Cliente', 'Nome_Cliente', 'Canal_Venda', 'uf_empresa', 'Recencia', 
+                st.dataframe(clientes_filtrados[['Cod_Cliente', 'Nome_Cliente', 'Vendedor','Canal_Venda', 'uf_empresa', 'Recencia', 
                                                 'Positivacao', 'Monetario', 'ticket_medio_posit', 'marcas', 'Mes_Ultima_Compra',
                                                 'qtd_titulos', 'vlr_inadimplente', 'status_inadimplente']].set_index('Cod_Cliente'))
 
@@ -329,7 +331,7 @@ def main():
     st.set_page_config(page_title="Análise Clientes", layout="wide", page_icon=ico_path)
 
     try:
-        st.sidebar.title('Configurações do Dashboard')
+        st.sidebar.title('Filtros')
         load_filters()
         create_dashboard()
     except Exception as e:

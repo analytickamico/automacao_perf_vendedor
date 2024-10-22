@@ -105,7 +105,7 @@ def get_empresas_from_database():
     query = """
     SELECT DISTINCT nome_empresa_faturamento as empresa 
     FROM "databeautykami".vw_distribuicao_empresa_pedido 
-    WHERE cod_empresa_faturamento not in ('9','21','5')
+    WHERE cod_empresa_faturamento not in ('9','21')
     ORDER BY 1
     """
     empresas = query_athena(query)['empresa'].tolist()
@@ -318,13 +318,13 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
         )
         AND pedidos.operacoes_internas = 'N'
         AND pedidos.dt_faturamento BETWEEN DATE('{start_date}') AND DATE('{end_date}')
-        AND empresa_pedido.cod_empresa_faturamento not in ('9','21','5')
+        AND empresa_pedido.cod_empresa_faturamento not in ('9','21')
             {channel_filter}
             {uf_filter}
             {brand_filter}
             {empresa_filter}
         GROUP BY 
-            item_pedidos.sku,
+            upper(item_pedidos.sku),
             empresa_pedido.cod_empresa_faturamento
     ),
         bonificacao AS (
@@ -342,7 +342,7 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
                 upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO','BRINDE OU DOAÇÃO','BRINDE','CAMPANHA','PROMOCAO')
                 AND pedidos.operacoes_internas = 'N'
                 AND date(dt_faturamento) BETWEEN date('{start_date}') AND date('{end_date}')
-                AND empresa_pedido.cod_empresa_faturamento not in ('9','21','5')
+                AND empresa_pedido.cod_empresa_faturamento not in ('9','21')
                 {channel_filter}
                 {uf_filter}
                 {brand_filter}
@@ -371,9 +371,10 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
         vendas v ON upper(e.cod_produto) = v.cod_produto and e.cod_empresa = v.cod_empresa
     LEFT JOIN
         bonificacao b ON upper(e.cod_produto) = b.cod_produto and e.cod_empresa = b.cod_empresa        
-    WHERE e.saldo_estoque > 0 and e.cod_empresa not in ('9','21','5')
+    WHERE e.cod_empresa not in ('9','21')
     {empresa_filter_stock}
     {brand_filter_stock}
+    and upper(e.cod_produto) not in (Select upper(cod_produto) from databeautykami.tbl_distribuicao_material_apoio)
     GROUP BY 1,2,3,4,6,7,8,9,10,11,12,13,14
     """
     logging.info(f"Executando query para get_stock_data: {query}")
@@ -435,7 +436,7 @@ def get_stock_turnover_data(start_date, end_date, selected_channels, selected_uf
     query = f"""
     WITH vendas AS (
         SELECT 
-            item_pedidos.sku as cod_produto, 
+            upper(item_pedidos.sku) as cod_produto, 
             SUM(item_pedidos.qtd) as quantidade_vendida
         FROM 
             databeautykami.vw_distribuicao_pedidos pedidos
@@ -451,7 +452,7 @@ def get_stock_turnover_data(start_date, end_date, selected_channels, selected_uf
             {f"AND empresa_pedido.nome_colaborador_atual IN ('{','.join(selected_colaboradores)}')" if selected_colaboradores else ""}
             {f"AND empresa_pedido.equipes IN ('{','.join(selected_teams)}')" if selected_teams else ""}
         GROUP BY 
-            item_pedidos.cod_produto
+            upper(item_pedidos.sku)
     )
     SELECT 
         e.cod_produto,
@@ -568,7 +569,7 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
         )
         AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
         AND pedidos.operacoes_internas = 'N'
-        AND empresa_pedido.cod_empresa_faturamento not in ('9','21','5')
+        AND empresa_pedido.cod_empresa_faturamento not in ('9','21')
         {channel_filter}
         {uf_filter}
         {brand_filter}
@@ -592,7 +593,7 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
                 upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO','BRINDE OU DOAÇÃO','BRINDE','CAMPANHA','PROMOCAO')
                 AND pedidos.operacoes_internas = 'N'
                 AND date(dt_faturamento) BETWEEN date('{start_date}') AND date('{end_date}')
-                AND empresa_pedido.cod_empresa_faturamento not in ('9','21','5')
+                AND empresa_pedido.cod_empresa_faturamento not in ('9','21')
                 {channel_filter}
                 {uf_filter}
                 {brand_filter}
@@ -623,12 +624,13 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
         END AS curva
       FROM
         "databeautykami"."tbl_varejo_saldo_estoque" e
-      WHERE saldo_estoque > 0 and cod_empresa not in ('9','21','5')
+      WHERE cod_empresa not in ('9','21')
       {empresa_filter_stock}
       {brand_filter_stock}
+      and upper(cod_produto) not in (Select upper(cod_produto) from databeautykami.tbl_distribuicao_material_apoio)
 
       GROUP BY
-        cod_produto,marca
+        upper(cod_produto),marca
     )
     SELECT 
         COALESCE(p.sku,e.sku) as sku,
@@ -1319,6 +1321,8 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
             a.Monetario,
             a.ticket_medio_posit,
             b.cod_colaborador_atual,
+            b.nome_colaborador_atual Vendedor,
+            b.equipes as Equipe,
             a.Maior_Mes as Mes_Ultima_Compra,
             a.Ciclo_Vida as Life_Time,
             a.marcas_concatenadas,
@@ -1374,11 +1378,12 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
         FROM
             rfm_scores
     )
-    SELECT
+    SELECT DISTINCT
         Cod_Cliente,
         Nome_Cliente,
         uf_empresa,
-        Canal_Venda,
+        Canal_Venda,        
+        Vendedor,
         Recencia,
         Positivacao,
         Monetario,

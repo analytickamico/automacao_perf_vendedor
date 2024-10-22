@@ -93,7 +93,7 @@ def load_filters():
         default=st.session_state.get('selected_ufs', [])
     )
     
-    all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=True)
+    all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
 
     with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
         if all_brands_selected:
@@ -313,7 +313,7 @@ def main():
     
 
     try:
-        st.sidebar.title('Configurações do Dashboard')
+        st.sidebar.title('Filtros')
         load_filters()
 
         #if st.session_state.get('data_needs_update', True):

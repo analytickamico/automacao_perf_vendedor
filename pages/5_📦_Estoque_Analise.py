@@ -72,38 +72,51 @@ def load_filters():
     st.session_state.filter_options['empresas'] = static_data.get('empresas', [])
 
     st.sidebar.header("Filtros")
+
+    st.session_state.selected_channels = st.sidebar.multiselect(
+        "Canais de Venda", 
+        options=st.session_state.filter_options['channels'],
+        default=st.session_state.get('selected_channels', [])
+    )
+
+    st.session_state.selected_ufs = st.sidebar.multiselect(
+        "UFs", 
+        options=st.session_state.filter_options['ufs'],
+        default=st.session_state.get('selected_ufs', [])
+    )
     
     # Filtro de marcas
     # Checkbox para selecionar todas as marcas
     # Checkbox para selecionar todas as marcas
     all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
 
-    # Expander para marcas específicas
     with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
-        # Se todas as marcas forem selecionadas, marque todas as opções
         if all_brands_selected:
             default_brands = st.session_state.filter_options['brands']
         else:
-            # Caso contrário, use a lista de marcas selecionadas anteriormente
             default_brands = st.session_state.get('selected_brands', [])
 
-        # Filtro de marcas
+        # Multiselect para marcas com opção de exclusão
         selected_brands = st.multiselect(
             "Marcas (desmarque para excluir)",
             options=st.session_state.filter_options['brands'],
             default=default_brands
         )
 
-    # Atualização do estado com as marcas selecionadas ou todas
+    # Atualizar as marcas selecionadas
     if all_brands_selected:
-        # Se todas as marcas forem selecionadas, seleciona todas as marcas
-        st.session_state.selected_brands = st.session_state.filter_options['brands']
+        st.session_state.selected_brands = [brand for brand in selected_brands if brand is not None]
+        excluded_brands = [brand for brand in st.session_state.filter_options['brands'] if brand not in selected_brands and brand is not None]
     else:
-        # Atualiza com base no que foi selecionado
-        st.session_state.selected_brands = selected_brands
+        st.session_state.selected_brands = [brand for brand in selected_brands if brand is not None]
+        excluded_brands = []
 
-    # Excluir as marcas que não foram selecionadas
-    excluded_brands = [brand for brand in st.session_state.filter_options['brands'] if brand not in st.session_state.selected_brands]
+    # Exibir marcas selecionadas ou excluídas
+    if all_brands_selected:
+        if excluded_brands:
+            st.sidebar.write(f"Marcas excluídas: {', '.join(excluded_brands)}")
+        else:
+            st.sidebar.write("Todas as marcas estão selecionadas")
 
     # Filtro de empresas
     all_empresas_selected = st.sidebar.checkbox("Selecionar Todas as Empresas", value=False)
@@ -262,7 +275,17 @@ def main():
                 st.warning("Não há dados ABC disponíveis para o período e filtros selecionados.")
                 return
             
-            stock_data = stock_data[stock_data['saldo_estoque'] > 0]
+            # Verificar se as colunas de quantidade vendida e bonificada existem
+            venda_col = 'quantidade_vendida' if 'quantidade_vendida' in stock_data.columns else None
+            bonificacao_col = 'quantidade_bonificada' if 'quantidade_bonificada' in stock_data.columns else None
+            
+            total_vendidos = abc_data[venda_col].sum() if venda_col else 0
+            total_bonificados = abc_data[bonificacao_col].sum() if bonificacao_col else 0
+             
+            stock_data = stock_data[
+                                ((stock_data['quantidade_vendida'] > 0) | (stock_data['quantidade_bonificada'] > 0)) | 
+                                (stock_data['saldo_estoque'] > 0)
+                                ]
             dias_periodo = 90  # Assumindo um período de 90 dias para o cálculo
             stock_data = calculate_giro_and_coverage(stock_data, dias_periodo)
 
@@ -271,30 +294,25 @@ def main():
             valor_total_estoque = stock_data['valor_total_estoque'].sum()
             giro_medio = stock_data['giro_anual'].mean()
             total_skus = stock_data['cod_produto'].nunique()
-            cobertura_media = stock_data['cobertura_dias'].median()
-            
-            # Verificar se as colunas de quantidade vendida e bonificada existem
-            venda_col = 'quantidade_vendida' if 'quantidade_vendida' in stock_data.columns else None
-            bonificacao_col = 'quantidade_bonificada' if 'quantidade_bonificada' in stock_data.columns else None
+            cobertura_media = stock_data['cobertura_dias'].median()         
 
-            total_vendidos = stock_data[venda_col].sum() if venda_col else 0
-            total_bonificados = stock_data[bonificacao_col].sum() if bonificacao_col else 0
-            
             # Calcular cobertura média usando uma abordagem mais robusta
             cobertura_media = np.percentile(stock_data['cobertura_dias'], 50)  # Mediana
             
             logging.info(f"Giro médio calculado: {giro_medio}")
             logging.info(f"Cobertura média calculada: {cobertura_media}")
-
                         
+            # Filtrar produtos com saldo_estoque > 0
+            abc_data = abc_data[
+                    ((abc_data['quantidade_vendida'] > 0) | (abc_data['quantidade_bonificada'] > 0)) | 
+                    (abc_data['saldo_estoque'] > 0)
+                    ]
+
             # Calcular métricas adicionais para abc_data
             abc_data = calculate_giro_and_coverage(abc_data, dias_periodo)
             
             # Classificar giro
             abc_data['classificacao_giro'] = abc_data['giro_anual'].apply(classify_giro)
-
-            # Filtrar produtos com saldo_estoque > 0
-            abc_data = abc_data[abc_data['saldo_estoque'] > 0]
            
             # Identificar outliers
             #outliers_cobertura = identify_outliers(abc_data, 'cobertura_dias')
