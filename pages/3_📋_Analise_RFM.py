@@ -10,7 +10,8 @@ from utils import (
     get_rfm_heatmap_data,
     create_rfm_heatmap_from_aggregated,
     get_rfm_segment_clients,
-    get_static_data
+    get_static_data,
+    get_recency_clients
 )
 import os
 
@@ -18,8 +19,23 @@ current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 ico_path = os.path.join(parent_dir, "favicon.ico")
 
+#def format_currency_br(value):
+    #return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 def format_currency_br(value):
+    if pd.isna(value):
+        return "-"
     return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def convert_to_number(value):
+    """Converte valores para número, tratando tanto strings quanto números"""
+    if pd.isna(value):
+        return 0
+    if isinstance(value, str):
+        # Se for string, remove R$, pontos e troca vírgula por ponto
+        return float(value.replace('R$ ', '').replace('.', '').replace(',', '.'))
+    # Se já for número, retorna o próprio valor
+    return float(value)
 
 def initialize_session_state():
     if 'filter_options' not in st.session_state:
@@ -251,72 +267,108 @@ Segmentação dos Clientes:
                 """)
 
         st.subheader("Clientes por Segmento RFM")
-        segmentos = ['Todos', 'Campeões', 'Clientes fiéis', 'Novos clientes', 'Perdidos', 'Atenção', 'Em risco', 'Potencial', 'Acompanhar']
-        segmentos_selecionados = st.multiselect("Selecione os segmentos", options=segmentos, default=['Atenção','Em risco'])
+        # Seleção do tipo de filtro
+        filtro_tipo = st.radio(
+            "Selecione o tipo de filtro:",
+            ["Por Segmento", "Por Recência"],
+            horizontal=True
+        )
+
+        if filtro_tipo == "Por Segmento":
+            segmentos = ['Todos', 'Campeões', 'Clientes fiéis', 'Novos clientes', 'Perdidos', 'Atenção', 'Em risco', 'Potencial', 'Acompanhar']
+            segmentos_selecionados = st.multiselect("Selecione os segmentos", options=segmentos, default=['Atenção','Em risco'])
+            modo_selecao = "segmento"
+            selecao = segmentos_selecionados
+        else:
+            recencias = [0, 1, 2, 3, 4, 5, 6, 'Maior que 6']
+            recencias_selecionadas = st.multiselect(
+                "Selecione os meses de recência",
+                options=recencias,
+                default=[3,4,5],
+                help="0 = Mês atual, 1 = Mês anterior, etc."
+            )
+            modo_selecao = "recencia"
+            selecao = recencias_selecionadas
 
         apenas_inadimplentes = st.checkbox("Mostrar apenas clientes inadimplentes")
 
-        # Verificar se houve mudança nos segmentos selecionados
-        if 'last_segmentos' not in st.session_state or st.session_state['last_segmentos'] != segmentos_selecionados:
+        # Verifica se houve mudança na seleção
+        if ('last_selecao' not in st.session_state or 
+            st.session_state.get('last_selecao') != selecao or 
+            st.session_state.get('last_modo') != modo_selecao):
             st.session_state['data_needs_update'] = True
-            st.session_state['last_segmentos'] = segmentos_selecionados
+            st.session_state['last_selecao'] = selecao
+            st.session_state['last_modo'] = modo_selecao
 
         if st.session_state.get('data_needs_update', True):
-            with st.spinner('Carregando clientes dos segmentos selecionados...'):
-                clientes_segmento = get_rfm_segment_clients(
-                    st.session_state['cod_colaborador'],
-                    st.session_state['start_date'],
-                    st.session_state['end_date'],
-                    segmentos_selecionados,
-                    st.session_state['selected_channels'],
-                    st.session_state['selected_ufs'],
-                    st.session_state['selected_colaboradores'],
-                    st.session_state['selected_teams']
-                )
-                st.session_state['clientes_segmento'] = clientes_segmento
+            with st.spinner('Carregando clientes...'):
+                if modo_selecao == "segmento":
+                    clientes = get_rfm_segment_clients(
+                        st.session_state['cod_colaborador'],
+                        st.session_state['start_date'],
+                        st.session_state['end_date'],
+                        selecao,
+                        st.session_state['selected_channels'],
+                        st.session_state['selected_ufs'],
+                        st.session_state['selected_colaboradores'],
+                        st.session_state['selected_teams']
+                    )
+                else:
+                    clientes = get_recency_clients(
+                        st.session_state['cod_colaborador'],
+                        st.session_state['start_date'],
+                        st.session_state['end_date'],
+                        selecao,
+                        st.session_state['selected_channels'],
+                        st.session_state['selected_ufs'],
+                        st.session_state['selected_colaboradores'],
+                        st.session_state['selected_teams']
+                    )
+                st.session_state['clientes_filtrados'] = clientes
                 st.session_state['data_needs_update'] = False
         else:
-            clientes_segmento = st.session_state['clientes_segmento']     
+            clientes = st.session_state['clientes_filtrados']
 
-        if clientes_segmento is not None and not clientes_segmento.empty:
+        if clientes is not None and not clientes.empty:
             # Aplicar o filtro de inadimplentes, se necessário
             if apenas_inadimplentes:
-                clientes_filtrados = clientes_segmento[clientes_segmento['status_inadimplente'] == 'Inadimplente']
+                clientes_filtrados = clientes[clientes['status_inadimplente'] == 'Inadimplente']
             else:
-                clientes_filtrados = clientes_segmento
+                clientes_filtrados = clientes
 
             if not clientes_filtrados.empty:
-                st.write(f"Clientes dos segmentos: {', '.join(segmentos_selecionados)}")
+                st.write(f"Clientes {'dos segmentos' if modo_selecao == 'segmento' else 'com recência'}: {', '.join(map(str, selecao))}")
                 if apenas_inadimplentes:
                     st.write("(Apenas clientes inadimplentes)")
 
-                # Função auxiliar para formatar valores monetários
-                def format_currency(value):
-                    if pd.isna(value):
-                        return "-"
-                    elif isinstance(value, str):
-                        return value
-                    else:
-                        # Formata o número no estilo americano, depois substitui vírgulas por pontos e pontos por vírgulas
-                        return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-                # Formatação das colunas monetárias
+                # Converter valores para numérico para garantir ordenação correta
                 for col in ['Monetario', 'ticket_medio_posit', 'vlr_inadimplente']:
-                    clientes_filtrados[col] = clientes_filtrados[col].apply(format_currency)
+                    clientes_filtrados[col] = clientes_filtrados[col].apply(convert_to_number)
 
-                # Exibição do DataFrame
-                st.dataframe(clientes_filtrados[['Cod_Cliente', 'Nome_Cliente', 'Vendedor','Canal_Venda', 'uf_empresa', 'Recencia', 
-                                                'Positivacao', 'Monetario', 'ticket_medio_posit', 'marcas', 'Mes_Ultima_Compra',
-                                                'qtd_titulos', 'vlr_inadimplente', 'status_inadimplente']].set_index('Cod_Cliente'))
+                # Configurar o DataFrame com formatação usando style
+                formatted_df = clientes_filtrados[[
+                    'Cod_Cliente', 'Nome_Cliente', 'Vendedor', 'Canal_Venda', 
+                    'uf_empresa', 'Recencia', 'Positivacao', 'Monetario', 
+                    'ticket_medio_posit', 'marcas', 'Mes_Ultima_Compra',
+                    'qtd_titulos', 'vlr_inadimplente', 'status_inadimplente'
+                ]].set_index('Cod_Cliente')
+
+                st.dataframe(
+                    formatted_df.style.format({
+                        'Monetario': format_currency_br,
+                        'ticket_medio_posit': format_currency_br,
+                        'vlr_inadimplente': format_currency_br,
+                        'Recencia': '{:.0f}',
+                        'Positivacao': '{:.0f}',
+                        'qtd_titulos': '{:.0f}'
+                    })
+                )
 
                 st.write(f"Total de clientes exibidos: {len(clientes_filtrados)}")
             else:
                 st.warning("Não há clientes que atendam aos critérios selecionados.")
         else:
-            st.warning("Não há clientes nos segmentos selecionados para o período e/ou filtros selecionados.")
-
-        logging.info("Finalizado criação do dashboard")
+            st.warning("Não há clientes para os filtros selecionados.")
 
 
 

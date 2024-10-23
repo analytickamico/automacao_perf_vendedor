@@ -23,7 +23,7 @@ __all__ = [
     'get_channels_and_ufs', 'get_colaboradores', 'get_client_status',
     'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache', 'get_team_options',
     'get_static_data', 'force_update_static_data','get_stock_purchases','get_stock_data','calculate_stock_metrics',
-    'create_metric_html'
+    'create_metric_html','get_recency_clients'
 ]
 
 # Configurar logging
@@ -1249,7 +1249,7 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
                     WHEN R_Score = 5 AND F_Score <= 2 THEN 'Novos clientes'
                     WHEN R_Score = 1 THEN 'Perdidos'
                     WHEN R_Score <= 3 AND F_Score = 1 THEN 'Atenção'
-                    WHEN R_Score <= 3 AND F_Score BETWEEN 2 and 3 THEN 'Em risco'                 
+                    WHEN F_Score <= 3 AND R_Score BETWEEN 2 and 3 THEN 'Em risco'                 
                     WHEN R_Score >= 3 AND F_Score >= 3 AND M_Score >= 2 THEN 'Potencial'
                     ELSE 'Acompanhar'
                 END AS Segmento
@@ -1371,7 +1371,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
                     WHEN R_Score = 5 AND F_Score <= 2 THEN 'Novos clientes'
                     WHEN R_Score = 1 THEN 'Perdidos'
                     WHEN R_Score <= 3 AND F_Score = 1 THEN 'Atenção'
-                    WHEN R_Score <= 3 AND F_Score BETWEEN 2 and 3 THEN 'Em risco'                 
+                    WHEN F_Score <= 3 AND R_Score BETWEEN 2 and 3 THEN 'Em risco'                 
                     WHEN R_Score >= 3 AND F_Score >= 3 AND M_Score >= 2 THEN 'Potencial'
                     ELSE 'Acompanhar'
                 END AS Segmento
@@ -1421,6 +1421,121 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
             logging.info(f"Colunas do DataFrame: {result.columns.tolist()}")
             logging.info(f"Primeiras linhas do DataFrame:\n{result.head().to_string()}")
         
+        return result
+    except Exception as e:
+        logging.error(f"Erro ao executar a query: {str(e)}")
+        raise
+
+def get_recency_clients(cod_colaborador, start_date, end_date, recencias, selected_channels, selected_ufs, selected_colaboradores, selected_teams):
+    """
+    Função similar ao get_rfm_segment_clients mas para recência
+    """
+    logging.info(f"Iniciando get_recency_clients com os seguintes parâmetros:")
+    logging.info(f"recencias selecionadas: {recencias}")
+
+    colaborador_filter = ""
+    if cod_colaborador:
+        colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_colaboradores:
+        colaboradores_str = "', '".join(selected_colaboradores)
+        colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
+    
+    channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
+    uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
+    team_filter = format_filter(selected_teams, "b.equipes")
+
+    # Construir a condição WHERE para recência
+    if 'Maior que 6' in recencias:
+        recencias = [r for r in recencias if r != 'Maior que 6']
+        recency_condition = (
+            f"(a.Recencia IN ({','.join(map(str, recencias))}) "
+            f"OR a.Recencia > 6)" if recencias else "a.Recencia > 6"
+        )
+    else:
+        recency_condition = f"a.Recencia IN ({','.join(map(str, recencias))})"
+
+    query = f"""
+    WITH rfm_base AS (
+        SELECT DISTINCT
+            a.Cod_Cliente,
+            a.Nome_Cliente,
+            a.uf_empresa,
+            a.Canal_Venda,
+            a.Recencia,
+            a.Positivacao,
+            a.Monetario,
+            a.ticket_medio_posit,
+            b.cod_colaborador_atual,
+            b.nome_colaborador_atual Vendedor,
+            b.equipes as Equipe,
+            a.Maior_Mes as Mes_Ultima_Compra,
+            a.Ciclo_Vida as Life_Time,
+            a.marcas_concatenadas,
+            c.status status_inadimplente,
+            c.qtd_titulos,
+            c.vlr_inadimplente
+        FROM
+            "databeautykami".vw_analise_perfil_cliente a
+        LEFT JOIN "databeautykami".vw_distribuicao_cliente_vendedor b 
+            ON a.Cod_Cliente = b.cod_cliente
+        LEFT JOIN "databeautykami".tbl_distribuicao_clientes_inadimplentes c 
+            ON a.Cod_Cliente = c.Cod_Cliente and a.uf_empresa = c.uf_empresa     
+        WHERE 1 = 1 
+        AND {recency_condition}
+        {colaborador_filter}
+        {channel_filter}
+        {uf_filter}
+        {team_filter}
+    ),
+    rfm_scores AS (
+        SELECT
+            *,
+            CASE
+                WHEN Recencia BETWEEN 0 AND 1 THEN 5
+                WHEN Recencia BETWEEN 2 AND 2 THEN 4
+                WHEN Recencia BETWEEN 3 AND 3 THEN 3
+                WHEN Recencia BETWEEN 4 AND 6 THEN 2
+                ELSE 1
+            END AS R_Score,
+            CASE
+                WHEN Positivacao >= 10 THEN 5
+                WHEN Positivacao BETWEEN 7 AND 9 THEN 4
+                WHEN Positivacao BETWEEN 3 AND 6 THEN 3
+                WHEN Positivacao BETWEEN 2 AND 2 THEN 2
+                ELSE 1
+            END AS F_Score,
+            NTILE(5) OVER (ORDER BY Monetario DESC) AS M_Score
+        FROM
+            rfm_base
+    )
+    SELECT DISTINCT
+        Cod_Cliente,
+        Nome_Cliente,
+        uf_empresa,
+        Canal_Venda,        
+        Vendedor,
+        Recencia,
+        Positivacao,
+        Monetario,
+        ticket_medio_posit,
+        R_Score,
+        F_Score,
+        M_Score,
+        Mes_Ultima_Compra,
+        Life_time,
+        marcas_concatenadas as marcas,
+        status_inadimplente,
+        qtd_titulos,
+        vlr_inadimplente
+    FROM
+        rfm_scores
+    ORDER BY
+        Monetario DESC, Canal_Venda;
+    """
+    
+    try:
+        logging.info("Executando query no Athena...")
+        result = query_athena(query)
         return result
     except Exception as e:
         logging.error(f"Erro ao executar a query: {str(e)}")
