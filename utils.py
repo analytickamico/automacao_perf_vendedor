@@ -870,6 +870,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
                 and upper(trim(marca.desc_abrev)) = upper(trim(item_pedidos.marca))
             WHERE
                 upper(pedidos."desc_abrev_cfop") in ('BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO','REMESSA EM BONIFICAÇÃO','BRINDE OU DOAÇÃO','BRINDE','CAMPANHA','PROMOCAO')
+                AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
                 AND pedidos.operacoes_internas = 'N'
                 {colaborador_filter}
                 {channel_filter}
@@ -879,7 +880,42 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
             GROUP BY {group_by_cols}
         )   boni 
     group by {group_by_cols_acum}
+    ),
+    devolucao AS (
+            SELECT
+                DATE_TRUNC('month', dt_faturamento) mes_ref,
+                {select_cols_subquery}
+                SUM(item_pedidos.preco_total) AS valor_devolucao
+            FROM
+                "databeautykami"."vw_distribuicao_pedidos" pedidos
+            LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+                ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+            LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+                ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"            
+            WHERE
+                (pedidos."desc_abrev_cfop") in (
+                            'ENTRADA DE DEVOLUÇÃO DE VENDA COM ST',
+                            'DEVOLUÇÃO DE VENDA FORA DO ESTADO',
+                            'DEVOLUÇÃO DE COMPRA ',
+                            'Devolução de compra para comercialização em operação com mercadoria sujeita ao regime de substituição tributária',
+                            'DEVOLUÇÃO DE VENDA ESTADUAL ST',
+                            'DEV. VENDA ',
+                            'DEVOLUÇÃO DE COMPRA P/ COMERCIALIZACAO ST',
+                            'ENTRADA DE DEVOLUÇÃO DE VENDA',
+                            'DEV. COMPRA P/ COMERCIALIZACAO COM ST',
+                            'DEV. VENDA MERC.ADQ. BRASIL DENTRO ESTADO',
+                            'DEVOLUÇÃO DE VENDA',
+                            'DEVOLUÇÃO DE VENDA DENTRO DO ESTADO ST'
+                )
+                AND pedidos.operacoes_internas = 'N'
+                {colaborador_filter}
+                {channel_filter}
+                {uf_filter}
+                {brand_filter}  
+                {team_filter}           
+            group by {group_by_cols_acum}
     )
+
     SELECT
         f.mes_ref,
         {select_cols_main}
@@ -1052,18 +1088,21 @@ def get_unique_customers_period(cod_colaborador, start_date, end_date, selected_
     df = query_athena(query)
     return df['clientes_unicos'].iloc[0] if not df.empty else 0
 
-def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
+def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador, selected_teams):
     colaborador_filter = ""
     if isinstance(selected_nome_colaborador, str):  # Para vendedores
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{selected_nome_colaborador}'"
     elif selected_nome_colaborador:  # Para admin/gestor
-        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{', '.join(selected_nome_colaborador)}')"
+        # Corrigido para garantir que cada colaborador tenha aspas simples corretamente
+        colaboradores = "', '".join(selected_nome_colaborador)
+        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{colaboradores}')"
     elif cod_colaborador:
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
 
     channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
     team_filter = format_filter(selected_teams, "empresa_pedido.equipes")
+
 
     query = f"""
     SELECT
@@ -1406,7 +1445,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
         Monetario DESC, Canal_Venda;
     """
     
-    logging.info(f"Query construída:")
+    logging.info(f"Query construída segmento:")
     logging.info(query)
     
     try:
