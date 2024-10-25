@@ -786,6 +786,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
     colaborador_filter = ""
     group_by_cols = "1, fator"
     group_by_cols_acum = "1"
+    group_by_cols_acum_2 = "1,2"
     select_cols_subquery = ""
     select_cols_main = ""
     select_cols_subquery_alias = ""
@@ -816,7 +817,8 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
             colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"    
        
         group_by_cols = "1, 2, 3, fator"
-        group_by_cols_acum = "1, 2, 3"
+        group_by_cols_acum = " 1,2,3"
+        group_by_cols_acum_2 = " 1,2,3,4"
     
         select_cols_subquery = """
         empresa_pedido.nome_colaborador_atual vendedor,
@@ -832,7 +834,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
     """
     else:
         colaborador_filter = ""
-        group_by_cols = "1, fator"
+        group_by_cols = "1,fator"
         group_by_cols_acum = "1"
         select_cols_subquery = ""
         select_cols_subquery_alias = ""
@@ -849,12 +851,12 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
     query = f"""
     WITH bonificacao AS (
         SELECT 
-            mes_ref,
+            dt_faturamento as data_ref,  -- Mudamos para data original
             {select_cols_subquery_alias}
             ROUND(SUM(valor_bonificacao_ajustada),2) valor_bonificacao
     FROM (
             SELECT
-                DATE_TRUNC('month', dt_faturamento) mes_ref,
+                dt_faturamento,  -- Removemos o DATE_TRUNC
                 {select_cols_subquery}
                 CASE WHEN fator IS NULL Then ROUND(SUM(item_pedidos.preco_total), 2)
                 Else ROUND(SUM(item_pedidos.preco_total)/fator,2) END AS valor_bonificacao_ajustada
@@ -877,13 +879,13 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
                 {uf_filter}
                 {brand_filter}  
                 {team_filter}
-            GROUP BY {group_by_cols}
-        )   boni 
-    group by {group_by_cols_acum}
+            GROUP BY  {group_by_cols}  -- Alterado para usar dt_faturamento
+        )   boni
+    group by  {group_by_cols_acum}  -- Alterado para usar data_ref
     ),
-    devolucao AS (
+   devolucao AS (
             SELECT
-                DATE_TRUNC('month', dt_faturamento) mes_ref,
+                dt_faturamento as data_ref,  -- Mudamos para data original
                 {select_cols_subquery}
                 SUM(item_pedidos.preco_total) AS valor_devolucao
             FROM
@@ -908,21 +910,24 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
                             'DEVOLUÇÃO DE VENDA DENTRO DO ESTADO ST'
                 )
                 AND pedidos.operacoes_internas = 'N'
+                AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
                 {colaborador_filter}
                 {channel_filter}
                 {uf_filter}
                 {brand_filter}  
                 {team_filter}           
-            group by {group_by_cols_acum}
+            group by {group_by_cols_acum}  -- Alterado para usar dt_faturamento
     )
 
     SELECT
-        f.mes_ref,
+        f.data_ref,
+        f.mes_ref,  -- Mantemos a coluna mes_ref para compatibilidade
         {select_cols_main}
         f.faturamento_bruto,
         f.faturamento_liquido,
         f.desconto,
         COALESCE(b.valor_bonificacao, 0) AS valor_bonificacao,
+        COALESCE(d.valor_devolucao, 0) AS valor_devolucao,
         f.custo_total,
         f.positivacao,
         f.qtd_pedido,
@@ -937,7 +942,8 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
         END AS markup_percentual
     FROM (
     SELECT
-        DATE_TRUNC('month', pedidos.dt_faturamento) mes_ref,
+        pedidos.dt_faturamento as data_ref,
+        DATE_TRUNC('month', pedidos.dt_faturamento) mes_ref,  -- Mantemos para compatibilidade
         {select_cols_subquery}
         ROUND(SUM(item_pedidos."preco_total"), 2) AS "faturamento_bruto",
         ROUND(SUM(item_pedidos."preco_desconto_rateado"), 2) AS "faturamento_liquido",
@@ -1008,11 +1014,13 @@ SELECT
         {uf_filter}
         {brand_filter}
         {team_filter}
-    group by {group_by_cols_acum}
+    group by {group_by_cols_acum_2}  -- Incluímos dt_faturamento no group by
     ) f
-    LEFT JOIN bonificacao b ON f.mes_ref = b.mes_ref 
+    LEFT JOIN bonificacao b ON f.data_ref = b.data_ref 
         {' AND f.cod_colaborador = b.cod_colaborador' if cod_colaborador or selected_nome_colaborador else ''}
-    ORDER BY f.mes_ref{', f.vendedor' if cod_colaborador or selected_nome_colaborador else ''}
+    LEFT JOIN devolucao d ON f.data_ref = d.data_ref 
+        {' AND f.cod_colaborador = d.cod_colaborador' if cod_colaborador or selected_nome_colaborador else ''}        
+    ORDER BY f.data_ref{', f.vendedor' if cod_colaborador or selected_nome_colaborador else ''}
     """
     
     logging.info(f"Query executada: {query}")
@@ -1048,7 +1056,12 @@ SELECT
     return df if df is not None else pd.DataFrame()
 
 def get_unique_customers_period(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
+    
+    brand_filter = ""
+    channel_filter = ""
+    uf_filter = ""
     colaborador_filter = ""
+
     if cod_colaborador:
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
@@ -1057,8 +1070,12 @@ def get_unique_customers_period(cod_colaborador, start_date, end_date, selected_
 
     channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
-    brand_filter = f"AND item_pedidos.marca IN ('{', '.join(selected_brands)}')" if selected_brands else ""
+    #brand_filter = f"AND item_pedidos.marca IN ('{', '.join(selected_brands)}')" if selected_brands else ""
     team_filter = format_filter(selected_teams, "empresa_pedido.equipes")
+
+    if selected_brands:
+        brands_str = "', '".join(selected_brands)
+        brand_filter = f"AND item_pedidos.marca IN ('{brands_str}')"
 
 
     query = f"""
@@ -1086,6 +1103,7 @@ def get_unique_customers_period(cod_colaborador, start_date, end_date, selected_
     """
     
     df = query_athena(query)
+    logging.info(f"Query executada clientes únicos: {query}")
     return df['clientes_unicos'].iloc[0] if not df.empty else 0
 
 def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador, selected_teams):

@@ -68,7 +68,78 @@ def format_brazilian(value, is_currency=False, decimal_places=2):
     except:
         return str(value) 
 
-
+@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
+def process_data_by_granularity(df, granularity):
+    """
+    Processa os dados de acordo com a granularidade temporal selecionada
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+    
+    try:
+        df = df.copy()
+        
+        # Garantir que as datas estão no formato correto
+        df['data_ref'] = pd.to_datetime(df['data_ref'])
+        df['mes_ref'] = pd.to_datetime(df['mes_ref'])
+        
+        if granularity == 'Mensal':
+            result = df.groupby('mes_ref').agg({
+                'faturamento_liquido': 'sum',
+                'positivacao': 'sum',
+                'desconto': 'sum',
+                'faturamento_bruto': 'sum',
+                'valor_bonificacao': 'sum',
+                'valor_devolucao': 'sum',
+                'qtd_pedido': 'sum',
+                'custo_total': 'sum'
+            }).reset_index()
+            
+            result['periodo_desc'] = result['mes_ref'].dt.strftime('%m-%Y')
+            
+            return result.sort_values('mes_ref').fillna(0)
+        
+        elif granularity == 'Semanal':
+            # Usar data_ref (data original) para criar as semanas
+            df['semana'] = df['data_ref'].dt.to_period('W')
+            df['semana_inicio'] = df['semana'].apply(lambda x: x.start_time)
+            df['semana_fim'] = df['semana'].apply(lambda x: x.end_time)
+            
+            # Agrupar por semana
+            weekly_data = df.groupby(['semana', 'semana_inicio', 'semana_fim']).agg({
+                'faturamento_liquido': 'sum',
+                'positivacao': 'sum',  # ou 'nunique' se precisar contar clientes únicos
+                'desconto': 'sum',
+                'faturamento_bruto': 'sum',
+                'valor_bonificacao': 'sum',
+                'valor_devolucao': 'sum',
+                'qtd_pedido': 'sum',
+                'custo_total': 'sum'
+            }).reset_index()
+            
+            # Criar descrição do período
+            weekly_data['periodo_desc'] = weekly_data.apply(
+                lambda x: f"{x['semana_inicio'].strftime('%d/%m')} a {x['semana_fim'].strftime('%d/%m')}",
+                axis=1
+            )
+            
+            # Ordenar por data
+            result = weekly_data.sort_values('semana_inicio')
+            
+            # Remover colunas auxiliares
+            result = result.drop(['semana', 'semana_inicio', 'semana_fim'], axis=1)
+            
+            return result.fillna(0)
+        
+        return pd.DataFrame()
+        
+    except Exception as e:
+        logging.error(f"Erro no processamento dos dados: {str(e)}", exc_info=True)
+        st.error(f"Erro ao processar dados: {str(e)}")
+        return pd.DataFrame()
+    
 @st.cache_data(ttl=3600)
 def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
     channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
@@ -87,7 +158,7 @@ def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
 @st.cache_data(ttl=3600)
 def get_colaboradores_cached(start_date, end_date, selected_channels, selected_ufs):
     return get_colaboradores(start_date, end_date, selected_channels, selected_ufs)
-
+    
 if 'filtros' not in st.session_state:
     st.session_state.filtros = {
         'channels': [],
@@ -374,402 +445,453 @@ def format_number(value):
     return value
 
 def create_dashboard():
+    try:
+        df = st.session_state.get('df')
+        brand_data = st.session_state.get('brand_data')
+        client_status_data = st.session_state.get('client_status_data')
+        cod_colaborador = st.session_state.get('cod_colaborador')
+        start_date = st.session_state.get('start_date')
+        end_date = st.session_state.get('end_date')
+        selected_channels = st.session_state.get('selected_channels')
+        selected_ufs = st.session_state.get('selected_ufs')
+        selected_brands = st.session_state.get('selected_brands')
+        selected_colaboradores = st.session_state.get('selected_colaboradores')
+        selected_teams = st.session_state.get('selected_teams')
+        show_additional_info = st.session_state.get('show_additional_info', False)
 
-    df = st.session_state.get('df')
-    brand_data = st.session_state.get('brand_data')
-    client_status_data = st.session_state.get('client_status_data')
-    cod_colaborador = st.session_state.get('cod_colaborador')
-    start_date = st.session_state.get('start_date')
-    end_date = st.session_state.get('end_date')
-    selected_channels = st.session_state.get('selected_channels')
-    selected_ufs = st.session_state.get('selected_ufs')
-    selected_brands = st.session_state.get('selected_brands')
-    selected_colaboradores = st.session_state.get('selected_colaboradores')
-    selected_teams = st.session_state.get('selected_teams')
-    show_additional_info = st.session_state.get('show_additional_info', False)
+        # Verificações iniciais
+        if df is None:
+            st.warning("Nenhum dado carregado. Por favor, escolha os filtros e acione Atualizar Dados.")
+            return
+        elif df.empty:
+            st.warning("Não há dados para o período e/ou filtros selecionados.")
+            return
 
-    logging.info(f"create_dashboard: cod_colaborador = {cod_colaborador}")
-    logging.info(f"create_dashboard: start_date = {start_date}, end_date = {end_date}")
-    logging.info(f"create_dashboard: selected_channels = {selected_channels}")
-    logging.info(f"create_dashboard: selected_ufs = {selected_ufs}")
-    logging.info(f"create_dashboard: selected_brands = {selected_brands}")
-    logging.info(f"create_dashboard: selected_colaboradores = {selected_colaboradores}")
+        # Título da página
+        if cod_colaborador:
+            st.title(f'Performance de Vendas 📈 - Colaborador {cod_colaborador}')
+        else:
+            st.title('Performance de Vendas 📈')
 
-    if df is None:
-        logging.warning("create_dashboard: df is None")
-        st.warning("Nenhum dado carregado. Por favor, escolha os filtros e acione Atualizar Dados.")
-        return
-    elif df.empty:
-        logging.warning(f"create_dashboard: df is empty. Columns: {df.columns}")
-        st.warning("Não há dados para o período e/ou filtros selecionados.")
-        return
-    else:
-        logging.info(f"create_dashboard: df shape = {df.shape}")
-        logging.info(f"create_dashboard: df columns = {df.columns}")
-        logging.info(f"create_dashboard: df head = \n{df.head()}")
+        # Processamento dos dados
+        # Aplicar filtro de marcas se necessário
+        if selected_brands and 'marca' in df.columns:
+            df = df[df['marca'].isin(selected_brands)]
 
-    if cod_colaborador:
-        st.title(f'Performance de Vendas 📈 - Colaborador {cod_colaborador}')
-    else:
-        st.title('Performance de Vendas 📈')
-
-       
-
-    # Aplicar filtro de marcas ao DataFrame principal
-    if selected_brands and 'marca' in df.columns:
-        df = df[df['marca'].isin(selected_brands)]
-
-    # Convertendo a coluna mes_ref para datetime e ordenando o DataFrame
-    df['mes_ref'] = pd.to_datetime(df['mes_ref'])
-    df = df.sort_values('mes_ref')
-
-    # Criando um DataFrame com todos os meses no intervalo
-    date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
-    all_months = pd.DataFrame({'mes_ref': date_range})
-
-    # Agrupando os dados por mês
-    monthly_data = df.groupby('mes_ref').agg({
-        'faturamento_liquido': 'sum',
-        'positivacao': 'sum',
-        'desconto': 'sum',
-        'faturamento_bruto': 'sum',
-        'valor_bonificacao': 'sum',
-        'qtd_pedido': 'sum' ,
-        'custo_total': 'sum'
-    }).reset_index()
-
-    # Mesclando com todos os meses para garantir que todos os meses apareçam
-    monthly_data = pd.merge(all_months, monthly_data, on='mes_ref', how='left').fillna(0)
-
-    # Calculando o somatório de todos os meses, excluindo a coluna 'mes_ref'
-    total_data = monthly_data.drop('mes_ref', axis=1).sum()
- 
-
-    # Adicionar a informação do período total
-    start_month = df['mes_ref'].min().strftime("%m/%Y")
-    end_month = df['mes_ref'].max().strftime("%m/%Y")
-    st.markdown(f"<h4 style='text-align: left; color: #666666;'>Métricas de {start_month} a {end_month}</h4>", unsafe_allow_html=True)
-  
-
-    # Cálculo dos percentuais baseados no total
-    desconto_percentual = (total_data['desconto'] / total_data['faturamento_bruto']) * 100 if total_data['faturamento_bruto'] != 0 else 0
-    bonificacao_percentual = (total_data['valor_bonificacao'] / total_data['faturamento_liquido']) * 100 if total_data['faturamento_liquido'] != 0 else 0
-
-    # Adicione este CSS personalizado no início do seu aplicativo
-    # Adicione este CSS no início do seu script ou em um arquivo .css separado
-
-
-    # Estilo CSS (coloque isso no início do seu script)
-    st.markdown("""
-    <style>
-    /* Seus estilos existentes */
-    .metric-container {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 15px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin-bottom: 10px;
-    }
-    .metric-container:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
-        transition: all 0.3s ease;
-    }
-    .metric-value {
-        font-size: 24px;
-        font-weight: bold;
-        margin-bottom: 5px;
-    }
-    .metric-label {
-        font-size: 16px;
-        color: #555;
-    }
-    .info-text {
-        font-size: 14px;
-        margin-top: 5px;
-    }
-    .info-text.green {
-        color: green;
-    }
-    .info-text.red {
-        color: red;
-    }
-
-    /* Novos estilos para o dataframe */
-    .dataframe-container {
-        width: 1000%;
-        margin: auto;
-        overflow-x: auto;
-    }
-    .dataframe {
-        font-size: 24px;
-    }
-
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Calcula o número de clientes únicos para todo o período
-    clientes_unicos_periodo = get_unique_customers_period(
-        cod_colaborador, start_date, end_date, selected_channels, 
-        selected_ufs, selected_brands, selected_colaboradores, selected_teams
-    )
-
-    # Métricas
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        st.markdown(create_metric_html(
-            "Faturamento Líquido", 
-            total_data['faturamento_liquido'],
-            info_text="<br>",
-            is_currency=True,
-            line_break=True
-        ), unsafe_allow_html=True)
-
-    with col2:
-        st.markdown(create_metric_html(
-            "Desconto", 
-            total_data['desconto'],
-            f"({(desconto_percentual):,.2f}% do faturamento bruto)", 
-            "red",
-            is_currency=True,
-            line_break=True
-        ), unsafe_allow_html=True)
-
-    with col3:
-        st.markdown(create_metric_html(
-            "Bonificação", 
-            total_data['valor_bonificacao'],
-            f"({(bonificacao_percentual):,.2f}% do faturamento líquido)", 
-            "green",
-            is_currency=True,
-            line_break=True
-        ), unsafe_allow_html=True)
-
-    with col4:
-        st.markdown(create_metric_html(
-            "Clientes Únicos", 
-            f"{clientes_unicos_periodo:,.0f}".replace(',', '.'), 
-            info_text="no período selecionado",
-            line_break=True
-        ), unsafe_allow_html=True)
-
-    with col5:
-        st.markdown(create_metric_html("Pedidos", f"{total_data['qtd_pedido']:,.0f}".replace(',', '.'), info_text="<br>",line_break=True),unsafe_allow_html=True)
-
-    # Segunda linha de métricas
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        markup_value = ((total_data['faturamento_liquido'] - total_data['custo_total'])  / total_data['custo_total'])+1
-        st.markdown(create_metric_html("Markup", f"{markup_value:.2f}".replace('.', ','), info_text="<br>",line_break=True), unsafe_allow_html=True)
-
-
-    # Gráfico de Faturamento e Positivações ao longo do tempo
-    fig_time = make_subplots(specs=[[{"secondary_y": True}]])
-
-    threshold = np.percentile(monthly_data['faturamento_liquido'], 25)
-
-    formatted_values = monthly_data['faturamento_liquido'].apply(format_currency)
-    formatted_values_positivacao = monthly_data['positivacao'].map("{:,.0f}".format).str.replace(',', '.', regex=False)
-
-
-    fig_time.add_trace(
-        go.Bar(
-            x=monthly_data['mes_ref'], 
-            y=monthly_data['faturamento_liquido'], 
-            name="Faturamento",
-            marker_color='lightblue',
-            #text=monthly_data['faturamento_liquido'].apply(lambda x: f"R${x/1000:.0f}K" if x >= 1000000 else f"R${x/1000:.1f}K"),
-            textfont=dict(size=12, color='black'), 
-            text=formatted_values,
-            #text=monthly_data['faturamento_liquido'].apply(lambda x: f"R${x/1000:.0f}K"),
-            textposition='auto', #monthly_data['faturamento_liquido']).apply(lambda x: 'outside' if x < threshold else 'inside'),
-            insidetextanchor='middle',  # Centraliza o texto verticalmente dentro da barra
-            textangle=0,  # Garante que o texto esteja horizontal
-            hovertemplate="Mês: %{x|%B %Y}<br>Faturamento: R$ %{y:,.2f}<extra></extra>"
-        ),
-        secondary_y=False
-    )
-
-    fig_time.add_trace(
-        go.Scatter(
-            x=monthly_data['mes_ref'], 
-            y=monthly_data['positivacao'], 
-            name="Clientes Únicos",
-            mode='lines+markers+text',
-            line=dict(color='red', width=2),
-            marker=dict(size=10),
-            textfont=dict(size=12),
-            text=formatted_values_positivacao, #monthly_data['positivacao'].apply(lambda x: f"{x:,.0f}"),
-            textposition='top center',
-            hovertemplate="Mês: %{x|%B %Y}<br>Clientes Únicos: %{y:,.0f}<extra></extra>"
-        ),
-        secondary_y=True
-    )
-
-    fig_time.update_layout(
-        title_text="Evolução de Clientes Únicos e Faturamento",
-        xaxis_title="Mês",
-        xaxis=dict(
-            tickformat="%b %Y",
-            tickangle=45,
-            tickmode='array',
-            tickvals=monthly_data['mes_ref']
-        ),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="right", x=1,font=dict(size=16)),
-        margin=dict(l=20, r=20, t=60, b=20),
-        hovermode="x unified",
-        font=dict(size=16),  # Aumenta o tamanho da fonte geral
-        title=dict(font=dict(size=20))
-    )
-
-    fig_time.update_yaxes(title_text="Faturamento (R$)", secondary_y=False)
-    fig_time.update_yaxes(title_text="Clientes Únicos", secondary_y=True)
-
-    st.plotly_chart(fig_time, use_container_width=True)
-    st.divider()
-
-    # Dados por marca
-
-    if brand_data is not None and not brand_data.empty and 'marca' in brand_data.columns:
-        st.markdown("<h3 style='font-size:20px;'><b>Dados por marca:</b></h3>", unsafe_allow_html=True)
+        # Converter datas
+        df['mes_ref'] = pd.to_datetime(df['mes_ref'])
+        df = df.sort_values('mes_ref')
         
-        # Filtro de marcas (se aplicável)
-        if st.session_state['user']['role'] != 'vendedor' and st.session_state['selected_brands']:
-            brand_data = brand_data[brand_data['marca'].isin(st.session_state['selected_brands'])]
-        
-        # Preparação dos dados
-        total_faturamento = brand_data['faturamento'].sum()
-        brand_data['share'] = brand_data['faturamento'] / total_faturamento
-        brand_data['markup'] = brand_data['markup_percentual'].apply(lambda x: x/100 + 1 if isinstance(x, (int, float)) else x)
-        brand_data = brand_data.sort_values('faturamento', ascending=False)
-        
-        # Seleção das colunas
-        display_data = brand_data[['marca', 'faturamento', 'share', 'clientes_unicos', 'qtd_pedido', 'qtd_sku', 'Ticket_Medio_Positivacao', 'markup']].copy()
-        
-        # Aplicando estilos
-        styler = display_data.style.format({
-            'faturamento': format_currency,
-            'share': format_number, #format_percentage,
-            'Ticket_Medio_Positivacao': format_currency,
-            'markup': format_number
-        })
-        
-        # Destacando o maior valor em cada coluna numérica
-        numeric_columns = ['faturamento', 'share', 'clientes_unicos', 'qtd_pedido', 'qtd_sku', 'Ticket_Medio_Positivacao', 'markup']
-       
-        
-        # Adicionando barras de progresso para o share
-        styler.bar(subset=['share'], color='#5fba7d', vmin=0, vmax=1)
+        # Criar range de datas adequado ao período
+        if start_date and end_date:
+            # Se as datas são do mesmo mês, usar o próprio mês
+            if start_date.replace(day=1) == end_date.replace(day=1):
+                date_range = pd.DatetimeIndex([start_date.replace(day=1)])
+            else:
+                # Caso contrário, criar range mensal
+                date_range = pd.date_range(
+                    start=start_date.replace(day=1),
+                    end=end_date.replace(day=1),
+                    freq='MS'
+                )
+        else:
+            date_range = pd.DatetimeIndex([df['mes_ref'].min()])
 
+        # Criar DataFrame base com as datas
+        all_months = pd.DataFrame({'mes_ref': date_range})
+
+        # Agregar dados
+        monthly_data = df.groupby(df['mes_ref'].dt.to_period('M')).agg({
+            'faturamento_liquido': 'sum',
+            'positivacao': 'sum',
+            'desconto': 'sum',
+            'faturamento_bruto': 'sum',
+            'valor_bonificacao': 'sum',
+            'valor_devolucao': 'sum',
+            'qtd_pedido': 'sum',
+            'custo_total': 'sum'
+        }).reset_index()
+        
+        # Converter período para timestamp para o merge
+        monthly_data['mes_ref'] = monthly_data['mes_ref'].dt.to_timestamp()
+
+        # Merge e preenchimento de valores nulos
+        monthly_data = pd.merge(
+            all_months,
+            monthly_data,
+            on='mes_ref',
+            how='left'
+        ).fillna(0)
+
+        # Calcular totais
+        total_data = monthly_data.drop('mes_ref', axis=1).sum()
+
+        # Display do período usando as datas originais da session
+        st.markdown(
+            f"<h4 style='text-align: left; color: #666666;'>"
+            f"Métricas de {start_date.strftime('%d/%m/%Y')} a {end_date.strftime('%d/%m/%Y')}</h4>",
+            unsafe_allow_html=True
+        )
+
+        # Cálculos
+        markup_value = ((total_data['faturamento_liquido'] - total_data['custo_total']) / total_data['custo_total'] + 1) if total_data['custo_total'] > 0 else 0
+        desconto_percentual = (total_data['desconto'] / total_data['faturamento_bruto'] * 100) if total_data['faturamento_bruto'] != 0 else 0
+        bonificacao_percentual = (total_data['valor_bonificacao'] / total_data['faturamento_liquido'] * 100) if total_data['faturamento_liquido'] != 0 else 0
+        devolucao_percentual = (total_data['valor_devolucao'] / total_data['faturamento_liquido'] * 100) if total_data['faturamento_liquido'] != 0 else 0
+
+        # Estilo CSS
         st.markdown("""
         <style>
-            .dataframe-container {
-                width: 100%;
-                margin: auto;
-                overflow-x: auto;
-            }
-            .dataframe {
-                font-size: 14px;
-                width: 100%;
-            }
-            .stDataFrame {
-                width: 100%;
-            }
+        .metric-container {
+            background-color: #f0f2f6;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 10px;
+        }
+        .metric-container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+            transition: all 0.3s ease;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .metric-label {
+            font-size: 16px;
+            color: #555;
+        }
+        .info-text {
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .info-text.green {
+            color: green;
+        }
+        .info-text.red {
+            color: red;
+        }
+        .dataframe-container {
+            width: 1000%;
+            margin: auto;
+            overflow-x: auto;
+        }
+        .dataframe {
+            font-size: 24px;
+        }
         </style>
         """, unsafe_allow_html=True)
 
-        # Crie uma coluna central para o dataframe
-        col1, col2, col3 = st.columns([1, 6, 1])  # Ajuste esses valores para alterar a largura
+        # Calcula o número de clientes únicos para todo o período
+        clientes_unicos_periodo = get_unique_customers_period(
+            cod_colaborador, start_date, end_date, selected_channels, 
+            selected_ufs, selected_brands, selected_colaboradores, selected_teams
+        )
 
-        with col2:  # Coluna central
-            st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-            
-            # Configuração do dataframe interativo
-            st.dataframe(
-                styler,
-                column_config={
-                    "marca": "Marca",
-                    "faturamento": st.column_config.TextColumn("Faturamento"),
-                    "share": st.column_config.ProgressColumn("Share", min_value=0, max_value=1),
-                    "clientes_unicos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
-                    "qtd_pedido": st.column_config.NumberColumn("Qtd. Pedidos", format="%d"),
-                    "qtd_sku": st.column_config.NumberColumn("Qtd. SKUs", format="%d"),
-                    "Ticket_Medio_Positivacao": st.column_config.TextColumn("Ticket Médio"),
-                    "markup": st.column_config.TextColumn("Markup")
-                },
-                height=350,
-                use_container_width=True,  # Alterado para True
-                hide_index=True
+        # Métricas
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        with col1:
+            st.markdown(create_metric_html(
+                "Faturamento Líquido", 
+                total_data['faturamento_liquido'],
+                info_text="<br>",
+                is_currency=True,
+                line_break=True
+            ), unsafe_allow_html=True)
+
+        with col2:
+            st.markdown(create_metric_html(
+                "Desconto", 
+                total_data['desconto'],
+                f"({(desconto_percentual):,.2f}% do faturamento bruto)", 
+                "red",
+                is_currency=True,
+                line_break=True
+            ), unsafe_allow_html=True)
+
+        with col3:
+            st.markdown(create_metric_html(
+                "Bonificação", 
+                total_data['valor_bonificacao'],
+                f"({(bonificacao_percentual):,.2f}% do faturamento líquido)", 
+                "green",
+                is_currency=True,
+                line_break=True
+            ), unsafe_allow_html=True)
+
+        with col4:
+            st.markdown(create_metric_html(
+                "Devolucao", 
+                total_data['valor_devolucao'],
+                f"({(devolucao_percentual):,.2f}% do faturamento líquido)", 
+                "green",
+                is_currency=True,
+                line_break=True
+            ), unsafe_allow_html=True)
+
+
+        # Segunda linha de métricas
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        with col1:
+            #markup_value = ((total_data['faturamento_liquido'] - total_data['custo_total'])  / total_data['custo_total'])+1
+            st.markdown(create_metric_html("Markup", f"{markup_value:.2f}".replace('.', ','), info_text="<br>",line_break=True), unsafe_allow_html=True)
+
+        with col2:
+            st.markdown(create_metric_html(
+                "Clientes Únicos", 
+                f"{clientes_unicos_periodo:,.0f}".replace(',', '.'), 
+                info_text="no período selecionado",
+                line_break=True
+            ), unsafe_allow_html=True)
+
+        with col3:
+            st.markdown(create_metric_html("Pedidos", f"{total_data['qtd_pedido']:,.0f}".replace(',', '.'), info_text="<br>",line_break=True),unsafe_allow_html=True)        
+
+
+        # Gráfico de Faturamento e Positivações ao longo do tempo
+        fig_time = make_subplots(specs=[[{"secondary_y": True}]])
+
+        threshold = np.percentile(monthly_data['faturamento_liquido'], 25)
+
+        formatted_values = monthly_data['faturamento_liquido'].apply(format_currency)
+        formatted_values_positivacao = monthly_data['positivacao'].map("{:,.0f}".format).str.replace(',', '.', regex=False)
+
+        try:
+            # Seletor de granularidade
+            granularity = st.selectbox(
+                "Selecione a granularidade temporal:",
+                options=['Mensal', 'Semanal'],
+                index=0
             )
-
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        # Fora da coluna central
-        st.write(f"Total de Faturamento: {format_currency(total_faturamento)}")
-        st.write(f"Total de Marcas: {len(display_data)}")
-    else:
-        st.warning("Não há dados por marca disponíveis para o período e/ou filtros selecionados.")
-
-    # Adicionar o gráfico de status do cliente
-    st.subheader("Status dos Clientes")
-    if client_status_data is not None and not client_status_data.empty:
-        fig_percentages, fig_base, status_averages = create_client_status_chart(client_status_data)
-        
-        if fig_base is not None:
-            st.plotly_chart(fig_base, use_container_width=True)
-        else:
-            st.warning("Gráfico da base total de clientes não disponível.")
-
-        if fig_percentages is not None:
-            st.plotly_chart(fig_percentages, use_container_width=True)
-        else:
-            st.warning("Gráfico de percentuais não disponível.")            
-        
-        # Apresentar os percentuais de cada status
-        if status_averages is not None and not status_averages.empty:
-            # Remover a 'Base' das médias, se existir
-            if 'Base' in status_averages.index:
-                total = status_averages['Base']
-                status_averages = status_averages.drop('Base')
+            
+            # Processe os dados de acordo com a granularidade selecionada
+            processed_data = process_data_by_granularity(df, granularity)
+            
+            if processed_data is not None and not processed_data.empty:
+                fig_time = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # Configurar valores do eixo x e dados para o gráfico
+                x_values = processed_data['periodo_desc']
+                
+                if granularity == 'Semanal':
+                    hover_template = "Período: %{x}<br>%{text}"
+                else:
+                    hover_template = "Mês: %{x}<br>%{text}"
+                
+                # Formatar valores para exibição
+                formatted_values = processed_data['faturamento_liquido'].fillna(0).apply(format_currency)
+                formatted_positivacao = processed_data['positivacao'].fillna(0).map("{:,.0f}".format).str.replace(',', '.', regex=False)
+                
+                # Barra de Faturamento
+                fig_time.add_trace(
+                    go.Bar(
+                        x=x_values,
+                        y=processed_data['faturamento_liquido'],
+                        name="Faturamento",
+                        marker_color='lightblue',
+                        textfont=dict(size=12, color='black'),
+                        text=formatted_values,
+                        textposition='auto',
+                        insidetextanchor='middle',
+                        textangle=0,
+                        hovertemplate=hover_template.replace("%{text}", "Faturamento: %{text}")
+                    ),
+                    secondary_y=False
+                )
+                
+                # Linha de Positivação
+                fig_time.add_trace(
+                    go.Scatter(
+                        x=x_values,
+                        y=processed_data['positivacao'],
+                        name="Clientes Únicos",
+                        mode='lines+markers+text',
+                        line=dict(color='red', width=2),
+                        marker=dict(size=10),
+                        textfont=dict(size=12),
+                        text=formatted_positivacao,
+                        textposition='top center',
+                        hovertemplate=hover_template.replace("%{text}", "Clientes Únicos: %{text}")
+                    ),
+                    secondary_y=True
+                )
+                
+                # Layout do gráfico
+                fig_time.update_layout(
+                    title_text=f"Evolução de Clientes Únicos e Faturamento ({granularity})",
+                    xaxis_title="Período",
+                    xaxis=dict(
+                        type='category',
+                        tickangle=45,
+                        tickmode='array',
+                        ticktext=x_values,
+                        tickvals=x_values,
+                    ),
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="right", x=1, font=dict(size=16)),
+                    margin=dict(l=20, r=20, t=60, b=20),
+                    hovermode="x unified",
+                    font=dict(size=16),
+                    title=dict(font=dict(size=20))
+                )
+                
+                fig_time.update_yaxes(title_text="Faturamento (R$)", secondary_y=False)
+                fig_time.update_yaxes(title_text="Clientes Únicos", secondary_y=True)
+                
+                st.plotly_chart(fig_time, use_container_width=True)
+                st.divider()
             else:
-                total = status_averages.sum()
+                st.warning("Não há dados suficientes para gerar o gráfico para o período selecionado.")
+                
+        except Exception as e:
+            st.error(f"Erro ao gerar o gráfico: {str(e)}")
+            logging.error(f"Erro na geração do gráfico: {str(e)}", exc_info=True)
 
-            # Calcular percentuais
-            percentages = (status_averages / total * 100).sort_values(ascending=False)
+    # Dados por marca
 
-            # Criar a string de status e percentuais
-            status_string = ", ".join([f"{status}: {percentage:.2f}%" for status, percentage in percentages.items()])
+        if brand_data is not None and not brand_data.empty and 'marca' in brand_data.columns:
+            st.markdown("<h3 style='font-size:20px;'><b>Dados por marca:</b></h3>", unsafe_allow_html=True)
+            
+            # Filtro de marcas (se aplicável)
+            if st.session_state['user']['role'] != 'vendedor' and st.session_state['selected_brands']:
+                brand_data = brand_data[brand_data['marca'].isin(st.session_state['selected_brands'])]
+            
+            # Preparação dos dados
+            total_faturamento = brand_data['faturamento'].sum()
+            brand_data['share'] = brand_data['faturamento'] / total_faturamento
+            brand_data['markup'] = brand_data['markup_percentual'].apply(lambda x: x/100 + 1 if isinstance(x, (int, float)) else x)
+            brand_data = brand_data.sort_values('faturamento', ascending=False)
+            
+            # Seleção das colunas
+            display_data = brand_data[['marca', 'faturamento', 'share', 'clientes_unicos', 'qtd_pedido', 'qtd_sku', 'Ticket_Medio_Positivacao', 'markup']].copy()
+            
+            # Aplicando estilos
+            styler = display_data.style.format({
+                'faturamento': format_currency,
+                'share': format_number, #format_percentage,
+                'Ticket_Medio_Positivacao': format_currency,
+                'markup': format_number
+            })
+            
+            # Destacando o maior valor em cada coluna numérica
+            numeric_columns = ['faturamento', 'share', 'clientes_unicos', 'qtd_pedido', 'qtd_sku', 'Ticket_Medio_Positivacao', 'markup']
+        
+            
+            # Adicionando barras de progresso para o share
+            styler.bar(subset=['share'], color='#5fba7d', vmin=0, vmax=1)
 
-            # Exibir a string usando st.write
-            st.write(f"Média dos Status:")
-            st.write(f"{status_string}")
+            st.markdown("""
+            <style>
+                .dataframe-container {
+                    width: 100%;
+                    margin: auto;
+                    overflow-x: auto;
+                }
+                .dataframe {
+                    font-size: 14px;
+                    width: 100%;
+                }
+                .stDataFrame {
+                    width: 100%;
+                }
+            </style>
+            """, unsafe_allow_html=True)
+
+            # Crie uma coluna central para o dataframe
+            col1, col2, col3 = st.columns([1, 6, 1])  # Ajuste esses valores para alterar a largura
+
+            with col2:  # Coluna central
+                st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
+                
+                # Configuração do dataframe interativo
+                st.dataframe(
+                    styler,
+                    column_config={
+                        "marca": "Marca",
+                        "faturamento": st.column_config.TextColumn("Faturamento"),
+                        "share": st.column_config.ProgressColumn("Share", min_value=0, max_value=1),
+                        "clientes_unicos": st.column_config.NumberColumn("Clientes Únicos", format="%d"),
+                        "qtd_pedido": st.column_config.NumberColumn("Qtd. Pedidos", format="%d"),
+                        "qtd_sku": st.column_config.NumberColumn("Qtd. SKUs", format="%d"),
+                        "Ticket_Medio_Positivacao": st.column_config.TextColumn("Ticket Médio"),
+                        "markup": st.column_config.TextColumn("Markup")
+                    },
+                    height=350,
+                    use_container_width=True,  # Alterado para True
+                    hide_index=True
+                )
+
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            # Fora da coluna central
+            st.write(f"Total de Faturamento: {format_currency(total_faturamento)}")
+            st.write(f"Total de Marcas: {len(display_data)}")
         else:
-            st.warning("Não há dados de status disponíveis.")
-    else:
-        st.warning("Não há dados disponíveis para os gráficos de status do cliente.")
+            st.warning("Não há dados por marca disponíveis para o período e/ou filtros selecionados.")
 
-    if show_additional_info:
-        with st.expander("Informações Adicionais"):
-            st.dataframe(df)
+        # Adicionar o gráfico de status do cliente
+        st.subheader("Status dos Clientes")
+        if client_status_data is not None and not client_status_data.empty:
+            fig_percentages, fig_base, status_averages = create_client_status_chart(client_status_data)
+            
+            if fig_base is not None:
+                st.plotly_chart(fig_base, use_container_width=True)
+            else:
+                st.warning("Gráfico da base total de clientes não disponível.")
+
+            if fig_percentages is not None:
+                st.plotly_chart(fig_percentages, use_container_width=True)
+            else:
+                st.warning("Gráfico de percentuais não disponível.")            
+            
+            # Apresentar os percentuais de cada status
+            if status_averages is not None and not status_averages.empty:
+                # Remover a 'Base' das médias, se existir
+                if 'Base' in status_averages.index:
+                    total = status_averages['Base']
+                    status_averages = status_averages.drop('Base')
+                else:
+                    total = status_averages.sum()
+
+                # Calcular percentuais
+                percentages = (status_averages / total * 100).sort_values(ascending=False)
+
+                # Criar a string de status e percentuais
+                status_string = ", ".join([f"{status}: {percentage:.2f}%" for status, percentage in percentages.items()])
+
+                # Exibir a string usando st.write
+                st.write(f"Média dos Status:")
+                st.write(f"{status_string}")
+            else:
+                st.warning("Não há dados de status disponíveis.")
+        else:
+            st.warning("Não há dados disponíveis para os gráficos de status do cliente.")
+
+        if show_additional_info:
+            with st.expander("Informações Adicionais"):
+                st.dataframe(df)
+
+    except Exception as e:
+        st.error(f"Erro ao processar os dados do dashboard: {str(e)}")
+        logging.error(f"Erro no dashboard: {str(e)}", exc_info=True)
 
 def main():
-    init_session_state()
-    load_page_specific_state("Performance_Vendedor")
-
-    if not st.session_state.get('logged_in', False):
-        st.warning("Por favor, faça login na página inicial para acessar esta página.")
-        return
-
-    st.set_page_config(page_title="Performance de Vendas", layout="wide", page_icon=ico_path)
-
     try:
-        st.sidebar.title('Filtros')
-        load_filters()  # Esta função agora inclui o botão "Atualizar Dados"
+        init_session_state()
+        load_page_specific_state("Performance_Vendedor")
 
-        create_dashboard()  # Esta função deve usar os dados carregados em st.session_state
+        if not st.session_state.get('logged_in', False):
+            st.warning("Por favor, faça login na página inicial para acessar esta página.")
+            return
+
+        st.set_page_config(page_title="Performance de Vendas", layout="wide", page_icon=ico_path)
+        st.sidebar.title('Filtros')
+        load_filters()
+        create_dashboard()
 
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o dashboard: {str(e)}")
