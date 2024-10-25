@@ -663,7 +663,7 @@ def create_dashboard():
         try:
             # Seletor de granularidade
             granularity = st.selectbox(
-                "Selecione a granularidade temporal:",
+                "Selecione o formato do período (Mensal ou Semanal):",
                 options=['Mensal', 'Semanal'],
                 index=0
             )
