@@ -22,7 +22,7 @@ from session_state_manager import init_session_state, load_page_specific_state, 
 from utils import (
     get_monthly_revenue, get_brand_data, get_channels_and_ufs,
     get_colaboradores, get_client_status, create_client_status_chart,
-    get_unique_customers_period, get_static_data
+    get_unique_customers_period, get_static_data, get_unique_customers_by_granularity,get_weighted_markup
     )
 
 logging.basicConfig(level=logging.INFO)
@@ -69,8 +69,6 @@ def format_brazilian(value, is_currency=False, decimal_places=2):
         return str(value) 
 
 @st.cache_data(ttl=3600)
-@st.cache_data(ttl=3600)
-@st.cache_data(ttl=3600)
 def process_data_by_granularity(df, granularity):
     """
     Processa os dados de acordo com a granularidade temporal selecionada
@@ -85,10 +83,26 @@ def process_data_by_granularity(df, granularity):
         df['data_ref'] = pd.to_datetime(df['data_ref'])
         df['mes_ref'] = pd.to_datetime(df['mes_ref'])
         
+        # Obter dados de clientes únicos com a granularidade correta
+        clientes_unicos_df = get_unique_customers_by_granularity(
+            st.session_state.get('cod_colaborador'),
+            st.session_state.get('start_date'),
+            st.session_state.get('end_date'),
+            st.session_state.get('selected_channels'),
+            st.session_state.get('selected_ufs'),
+            st.session_state.get('selected_brands'),
+            st.session_state.get('selected_colaboradores'),
+            st.session_state.get('selected_teams'),
+            granularity
+        )
+        
+        # Log para debug
+        logging.info(f"Dados de clientes únicos obtidos: {clientes_unicos_df.shape}")
+        logging.info(f"Primeiras linhas de clientes únicos:\n{clientes_unicos_df.head()}")
+        
         if granularity == 'Mensal':
             result = df.groupby('mes_ref').agg({
                 'faturamento_liquido': 'sum',
-                'positivacao': 'sum',
                 'desconto': 'sum',
                 'faturamento_bruto': 'sum',
                 'valor_bonificacao': 'sum',
@@ -99,18 +113,15 @@ def process_data_by_granularity(df, granularity):
             
             result['periodo_desc'] = result['mes_ref'].dt.strftime('%m-%Y')
             
-            return result.sort_values('mes_ref').fillna(0)
-        
         elif granularity == 'Semanal':
-            # Usar data_ref (data original) para criar as semanas
-            df['semana'] = df['data_ref'].dt.to_period('W')
-            df['semana_inicio'] = df['semana'].apply(lambda x: x.start_time)
-            df['semana_fim'] = df['semana'].apply(lambda x: x.end_time)
+            # Usar W-SUN para começar a semana no domingo
+            df['semana'] = df['data_ref'].dt.to_period('W-SUN')
+            df['data_ref_inicio'] = df['semana'].apply(lambda x: x.start_time)
+            df['data_ref_fim'] = df['semana'].apply(lambda x: x.end_time)
             
             # Agrupar por semana
-            weekly_data = df.groupby(['semana', 'semana_inicio', 'semana_fim']).agg({
+            weekly_data = df.groupby(['semana', 'data_ref_inicio', 'data_ref_fim']).agg({
                 'faturamento_liquido': 'sum',
-                'positivacao': 'sum',  # ou 'nunique' se precisar contar clientes únicos
                 'desconto': 'sum',
                 'faturamento_bruto': 'sum',
                 'valor_bonificacao': 'sum',
@@ -121,24 +132,41 @@ def process_data_by_granularity(df, granularity):
             
             # Criar descrição do período
             weekly_data['periodo_desc'] = weekly_data.apply(
-                lambda x: f"{x['semana_inicio'].strftime('%d/%m')} a {x['semana_fim'].strftime('%d/%m')}",
+                lambda x: f"{x['data_ref_inicio'].strftime('%d/%m')} a {x['data_ref_fim'].strftime('%d/%m')}",
                 axis=1
             )
             
-            # Ordenar por data
-            result = weekly_data.sort_values('semana_inicio')
-            
-            # Remover colunas auxiliares
-            result = result.drop(['semana', 'semana_inicio', 'semana_fim'], axis=1)
-            
-            return result.fillna(0)
+            result = weekly_data.sort_values('data_ref_inicio')
+            result = result.drop(['semana', 'data_ref_inicio', 'data_ref_fim'], axis=1)
         
-        return pd.DataFrame()
+        # Log para debug
+        logging.info(f"Dados financeiros processados: {result.shape}")
+        logging.info(f"Primeiras linhas dos dados financeiros:\n{result.head()}")
+        
+        # Merge com os dados de clientes únicos
+        result = pd.merge(
+            result,
+            clientes_unicos_df[['periodo_desc', 'clientes_unicos']],
+            on='periodo_desc',
+            how='left'
+        )
+        
+        # Log após o merge
+        logging.info(f"Resultado após merge: {result.shape}")
+        logging.info(f"Primeiras linhas após merge:\n{result.head()}")
+        
+        # Renomear e preencher valores nulos
+        result = result.rename(columns={'clientes_unicos': 'positivacao'})
+        result = result.fillna(0)
+        
+        return result
         
     except Exception as e:
         logging.error(f"Erro no processamento dos dados: {str(e)}", exc_info=True)
         st.error(f"Erro ao processar dados: {str(e)}")
         return pd.DataFrame()
+
+
     
 @st.cache_data(ttl=3600)
 def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
@@ -534,7 +562,17 @@ def create_dashboard():
         )
 
         # Cálculos
-        markup_value = ((total_data['faturamento_liquido'] - total_data['custo_total']) / total_data['custo_total'] + 1) if total_data['custo_total'] > 0 else 0
+        #markup_value = ((total_data['faturamento_liquido'] - total_data['custo_total']) / total_data['custo_total'] + 1) if total_data['custo_total'] > 0 else 1
+        markup_value = get_weighted_markup(
+                            cod_colaborador=st.session_state['cod_colaborador'],
+                            start_date=st.session_state['start_date'],
+                            end_date=st.session_state['end_date'],
+                            selected_channels=st.session_state['selected_channels'],
+                            selected_ufs=st.session_state['selected_ufs'],
+                            selected_brands=st.session_state['selected_brands'],
+                            selected_nome_colaborador=st.session_state['selected_colaboradores'],
+                            selected_teams=st.session_state['selected_teams']
+)
         desconto_percentual = (total_data['desconto'] / total_data['faturamento_bruto'] * 100) if total_data['faturamento_bruto'] != 0 else 0
         bonificacao_percentual = (total_data['valor_bonificacao'] / total_data['faturamento_liquido'] * 100) if total_data['faturamento_liquido'] != 0 else 0
         devolucao_percentual = (total_data['valor_devolucao'] / total_data['faturamento_liquido'] * 100) if total_data['faturamento_liquido'] != 0 else 0

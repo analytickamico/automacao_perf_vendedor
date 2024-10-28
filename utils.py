@@ -23,7 +23,7 @@ __all__ = [
     'get_channels_and_ufs', 'get_colaboradores', 'get_client_status',
     'create_client_status_chart', 'create_new_rfm_heatmap', 'clear_cache', 'get_team_options',
     'get_static_data', 'force_update_static_data','get_stock_purchases','get_stock_data','calculate_stock_metrics',
-    'create_metric_html','get_recency_clients'
+    'create_metric_html','get_recency_clients','get_unique_customers_by_granularity','get_weighted_markup'
 ]
 
 # Configurar logging
@@ -1105,6 +1105,255 @@ def get_unique_customers_period(cod_colaborador, start_date, end_date, selected_
     df = query_athena(query)
     logging.info(f"Query executada clientes únicos: {query}")
     return df['clientes_unicos'].iloc[0] if not df.empty else 0
+
+@st.cache_data(ttl=3600)
+def get_weighted_markup(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, 
+                       selected_brands, selected_nome_colaborador, selected_teams):
+    """
+    Calcula o markup ponderado pelo faturamento de cada SKU
+    """
+    brand_filter = ""
+    channel_filter = ""
+    uf_filter = ""
+    colaborador_filter = ""
+
+    if cod_colaborador:
+        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_nome_colaborador:
+        nome_str = "', '".join(selected_nome_colaborador)
+        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+
+    if selected_channels:
+        channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')"
+    
+    if selected_ufs:
+        uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')"
+    
+    if selected_brands:
+        brands_str = "', '".join(selected_brands)
+        brand_filter = f"AND item_pedidos.marca IN ('{brands_str}')"
+
+    team_filter = format_filter(selected_teams, "empresa_pedido.equipes")
+
+    query = f"""
+    WITH dados_sku AS (
+        SELECT 
+            item_pedidos.sku,
+            item_pedidos.preco_desconto_rateado as faturamento_liquido,
+            COALESCE(cmv.custo_medio, 0) * item_pedidos.qtd as custo_total
+        FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
+        LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+            ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+        LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+            ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+        LEFT JOIN (
+            SELECT
+                cod_pedido,
+                cod_produto,
+                mes_ref,
+                SUM(custo_medio) as custo_medio
+            FROM (
+                SELECT 
+                    cod_pedido,
+                    cod_produto,
+                    DATE_TRUNC('month', dt_faturamento) mes_ref,
+                    CASE 
+                        WHEN fator IS NULL Then ROUND(SUM(qtd * custo_unitario) / NULLIF(SUM(qtd), 0), 2)
+                        Else ROUND(SUM(qtd * (custo_unitario/fator)) / NULLIF(SUM(qtd), 0), 2)  
+                    END custo_medio
+                FROM "databeautykami".tbl_varejo_cmv 
+                LEFT JOIN "databeautykami".tbl_distribuicao_bonificacao
+                    ON tbl_varejo_cmv.cod_marca = tbl_distribuicao_bonificacao.cod_marca
+                    AND DATE_TRUNC('month', dt_faturamento) = date(tbl_distribuicao_bonificacao.mes_ref)
+                GROUP BY 1, 2, 3, fator 
+                UNION ALL 
+                SELECT
+                    cod_pedido,
+                    codprod,
+                    DATE_TRUNC('month', dtvenda) mes_ref,
+                    CASE 
+                        WHEN fator IS NULL Then ROUND(SUM(quant * custo) / NULLIF(SUM(quant), 0), 2)
+                        Else ROUND(SUM(quant * (custo/fator)) / NULLIF(SUM(quant), 0), 2)  
+                    END custo_medio
+                FROM "databeautykami".tbl_salao_pedidos_salao 
+                LEFT JOIN "databeautykami".tbl_distribuicao_bonificacao
+                    ON DATE_TRUNC('month', dtvenda) = date(tbl_distribuicao_bonificacao.mes_ref)
+                    AND ( 
+                        trim(upper(tbl_salao_pedidos_salao.categoria)) = trim(upper(tbl_distribuicao_bonificacao.marca))
+                        OR substring(replace(upper(tbl_salao_pedidos_salao.categoria),'-',''),1,4) = upper(tbl_distribuicao_bonificacao.marca)
+                    )
+                WHERE fator is not null
+                GROUP BY 1, 2, 3, fator   
+            ) cmv_aux
+            GROUP BY 1,2,3
+        ) cmv 
+            ON pedidos.cod_pedido = cmv.cod_pedido 
+            AND item_pedidos.sku = cmv.cod_produto 
+            AND DATE_TRUNC('month', pedidos.dt_faturamento) = cmv.mes_ref
+        WHERE
+            pedidos."desc_abrev_cfop" IN (
+                'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
+                'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
+                'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
+                'Venda de mercadoria sujeita ao regime de substituição tributária',
+                'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
+            )
+            AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+            AND pedidos.operacoes_internas = 'N'
+            {colaborador_filter}
+            {channel_filter}
+            {uf_filter}
+            {brand_filter}
+            {team_filter}
+    )
+    SELECT 
+        SUM(CASE 
+            WHEN custo_total > 0 
+            THEN ((faturamento_liquido / custo_total) - 1) * faturamento_liquido 
+            ELSE 0 
+        END) / NULLIF(SUM(faturamento_liquido), 0) + 1 as markup_ponderado
+    FROM dados_sku
+    WHERE custo_total > 0
+    """
+
+    df = query_athena(query)
+    
+    if df.empty:
+        return 1.0  # valor default se não houver dados
+    
+    markup_ponderado = df['markup_ponderado'].iloc[0]
+    return markup_ponderado if markup_ponderado > 0 else 1.0
+        
+# Função auxiliar para formatar data nos logs
+def format_date(date_obj):
+    return date_obj.strftime('%Y-%m-%d') if date_obj else None
+
+def get_unique_customers_by_granularity(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, 
+                                      selected_brands, selected_nome_colaborador, selected_teams, granularity='Mensal'):
+    """
+    Retorna a contagem de clientes únicos por período
+    """
+    brand_filter = ""
+    channel_filter = ""
+    uf_filter = ""
+    colaborador_filter = ""
+
+    if cod_colaborador:
+        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_nome_colaborador:
+        nome_str = "', '".join(selected_nome_colaborador)
+        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+
+    if selected_channels:
+        channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')"
+    
+    if selected_ufs:
+        uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')"
+    
+    if selected_brands:
+        brands_str = "', '".join(selected_brands)
+        brand_filter = f"AND item_pedidos.marca IN ('{brands_str}')"
+
+    team_filter = format_filter(selected_teams, "empresa_pedido.equipes")
+
+    if granularity == 'Mensal':
+        query = f"""
+        WITH dados_mensais AS (
+            SELECT 
+                date_trunc('month', pedidos.dt_faturamento) as mes_ref,
+                pedidos.cpfcnpj
+            FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
+            LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+                ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+            LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+                ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+            WHERE
+                pedidos."desc_abrev_cfop" IN (
+                    'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
+                    'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
+                    'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
+                    'Venda de mercadoria sujeita ao regime de substituição tributária',
+                    'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
+                )
+                AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+                AND pedidos.operacoes_internas = 'N'
+                {colaborador_filter}
+                {channel_filter}
+                {uf_filter}
+                {brand_filter}
+                {team_filter}
+        )
+        SELECT 
+            mes_ref as data_ref,
+            COUNT(DISTINCT cpfcnpj) as clientes_unicos
+        FROM dados_mensais
+        GROUP BY mes_ref
+        ORDER BY mes_ref
+        """
+    else:  # Semanal
+        query = f"""
+        WITH dados_semanais AS (
+            SELECT 
+                date_trunc('week', pedidos.dt_faturamento) as data_inicio,
+                date_trunc('week', pedidos.dt_faturamento) + interval '6' day as data_fim,
+                pedidos.cpfcnpj
+            FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
+            LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+                ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+            LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+                ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+            WHERE
+                pedidos."desc_abrev_cfop" IN (
+                    'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
+                    'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
+                    'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
+                    'Venda de mercadoria sujeita ao regime de substituição tributária',
+                    'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
+                )
+                AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+                AND pedidos.operacoes_internas = 'N'
+                {colaborador_filter}
+                {channel_filter}
+                {uf_filter}
+                {brand_filter}
+                {team_filter}
+        )
+        SELECT 
+            data_inicio,
+            data_fim,
+            COUNT(DISTINCT cpfcnpj) as clientes_unicos
+        FROM dados_semanais
+        GROUP BY data_inicio, data_fim
+        ORDER BY data_inicio
+        """
+
+    logging.info(f"Query de clientes únicos sendo executada ({granularity}): {query}")
+    
+    df = query_athena(query)
+    
+    if df.empty:
+        logging.warning("Query retornou DataFrame vazio")
+        return pd.DataFrame()
+
+    # Formatar períodos de acordo com a granularidade
+    if granularity == 'Mensal':
+        df['data_ref'] = pd.to_datetime(df['data_ref'])
+        df['periodo_desc'] = df['data_ref'].dt.strftime('%m-%Y')
+    else:
+        df['data_inicio'] = pd.to_datetime(df['data_inicio'])
+        df['data_fim'] = pd.to_datetime(df['data_fim'])
+        df['periodo_desc'] = df.apply(
+            lambda x: f"{x['data_inicio'].strftime('%d/%m')} a {x['data_fim'].strftime('%d/%m')}",
+            axis=1
+        )
+
+    # Log para debug
+    logging.info(f"Dados de clientes únicos processados por {granularity}:")
+    logging.info(f"Total de períodos: {len(df)}")
+    logging.info(f"Períodos gerados: {df['periodo_desc'].tolist()}")
+    logging.info(f"Contagens: {df['clientes_unicos'].tolist()}")
+
+    return df[['periodo_desc', 'clientes_unicos']]
 
 def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador, selected_teams):
     colaborador_filter = ""
