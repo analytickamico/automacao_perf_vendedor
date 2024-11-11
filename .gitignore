@@ -121,3 +121,10 @@ Thumbs.db
 
 # Arquivos de log
 *.log
+
+data/
+
+# diretorios e arquivos outros assuntos
+
+pdfs_baixados/
+.extrai_nota_pdf.py

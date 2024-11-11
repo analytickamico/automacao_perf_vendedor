@@ -531,7 +531,7 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
 
     if selected_empresas:
         empresas_str = "', '".join(selected_empresas)
@@ -706,7 +706,7 @@ def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels,
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
 
     query = f"""
     WITH produto_sales AS (
@@ -814,7 +814,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
         elif selected_nome_colaborador:
             # Apenas aplique o filtro de nome se não houver um código de colaborador
             nome_str = "', '".join(selected_nome_colaborador)
-            colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"    
+            colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"    
        
         group_by_cols = "1, 2, 3, fator"
         group_by_cols_acum = " 1,2,3"
@@ -843,7 +843,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
 
     if selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        nome_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+        nome_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
 
     team_filter = format_filter(selected_teams, "empresa_pedido.equipes")
 
@@ -1066,7 +1066,7 @@ def get_unique_customers_period(cod_colaborador, start_date, end_date, selected_
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
 
     channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
@@ -1121,7 +1121,7 @@ def get_weighted_markup(cod_colaborador, start_date, end_date, selected_channels
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
 
     if selected_channels:
         channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')"
@@ -1242,7 +1242,7 @@ def get_unique_customers_by_granularity(cod_colaborador, start_date, end_date, s
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
 
     if selected_channels:
         channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')"
@@ -1362,7 +1362,7 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
     elif selected_nome_colaborador:  # Para admin/gestor
         # Corrigido para garantir que cada colaborador tenha aspas simples corretamente
         colaboradores = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{colaboradores}')"
+        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{colaboradores}') OR empresa_pedido.nome_colaborador_pedido IN ('{colaboradores}') )"
     elif cod_colaborador:
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
 
@@ -1489,7 +1489,7 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
         colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_colaboradores:
         colaboradores_str = "', '".join(selected_colaboradores)
-        colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
+        colaborador_filter = f"AND (b.nome_colaborador_atual IN ('{colaboradores_str}') )"
     
     channel_filter = ""
     if selected_channels:
@@ -1606,7 +1606,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
         colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_colaboradores:
         colaboradores_str = "', '".join(selected_colaboradores)
-        colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
+        colaborador_filter = f"AND (b.nome_colaborador_atual IN ('{colaboradores_str}'))"
     
     segmentos_query = get_segmentos_query(segmentos)
     
@@ -1744,22 +1744,46 @@ def get_recency_clients(cod_colaborador, start_date, end_date, recencias, select
         colaborador_filter = f"AND b.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_colaboradores:
         colaboradores_str = "', '".join(selected_colaboradores)
-        colaborador_filter = f"AND b.nome_colaborador_atual IN ('{colaboradores_str}')"
+        colaborador_filter = f"AND (b.nome_colaborador_atual IN ('{colaboradores_str}'))"
     
     channel_filter = f"AND a.Canal_Venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND a.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
     team_filter = format_filter(selected_teams, "b.equipes")
 
-    # Construir a condição WHERE para recência
-    if 'Maior que 6' in recencias:
-        recencias = [r for r in recencias if r != 'Maior que 6']
-        recency_condition = (
-            f"(a.Recencia IN ({','.join(map(str, recencias))}) "
-            f"OR a.Recencia > 6)" if recencias else "a.Recencia > 6"
-        )
-    else:
-        recency_condition = f"a.Recencia IN ({','.join(map(str, recencias))})"
+    if not isinstance(recencias, list):
+        recencias = [recencias]
+    
+    # Converter todos os valores para inteiros, exceto 'Maior que 6'
+    recencias_processadas = []
+    for rec in recencias:
+        if isinstance(rec, (int, float)) or (isinstance(rec, str) and rec.isdigit()):
+            recencias_processadas.append(int(float(rec)))
+        else:
+            recencias_processadas.append(rec)
+            
+    logging.info(f"Recências processadas: {recencias_processadas}")
 
+    # Construir a condição WHERE para recência
+    if len(recencias_processadas) == 1:
+            if recencias_processadas[0] == 0:
+                recency_condition = "recencia = 0"  # Corrigido aqui para recency_condition
+            elif recencias_processadas[0] == 'Maior que 6':
+                recency_condition = "recencia > 6"  # Corrigido aqui para recency_condition
+            else:
+                recency_condition = f"recencia = {recencias_processadas[0]}"  # Corrigido aqui para recency_condition
+    else:
+        # Para múltiplas recências
+        conditions = []
+        for rec in recencias_processadas:
+            if rec == 'Maior que 6':
+                    conditions.append("recencia > 6")
+            else:
+                conditions.append(f"recencia = {rec}")
+        recency_condition = f"({' OR '.join(conditions)})"  # Corrigido aqui para recency_condition
+        
+    logging.info(f"Condição de recência construída: {recency_condition}")
+
+    # Resto da função permanece igual...
     query = f"""
     WITH rfm_base AS (
         SELECT DISTINCT
@@ -1855,7 +1879,7 @@ def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channel
         elif selected_colaboradores:
             # Apenas aplique o filtro de nome se não houver um código de colaborador
             nome_str = "', '".join(selected_colaboradores)
-            colaborador_filter = f"AND b.nome_colaborador_atual IN ('{nome_str}')"
+            colaborador_filter = f"AND (b.nome_colaborador_atual IN ('{nome_str}'))"
     else:
         colaborador_filter = ""
 
@@ -2078,7 +2102,8 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
     elif selected_nome_colaborador:
         # Apenas aplique o filtro de nome se não houver um código de colaborador
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND vw_distribuicao_empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
+        colaborador_filter = f"AND ( vw_distribuicao_empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR vw_distribuicao_empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        
   
     channel_filter = ""
     if selected_channels:

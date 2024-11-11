@@ -22,6 +22,9 @@ filelock==3.16.0
 Flask==3.0.3
 fonttools==4.53.1
 fsspec==2024.9.0
+geographiclib==2.0
+geopy==2.4.1
+git-filter-repo==2.45.0
 gitdb==4.0.11
 GitPython==3.1.43
 google-api-core==2.20.0
@@ -48,6 +51,7 @@ MarkupSafe==2.1.5
 matplotlib==3.9.2
 matplotlib-inline==0.1.7
 mdurl==0.1.2
+mysql-connector-python==9.1.0
 narwhals==1.6.4
 nest-asyncio==1.6.0
 numpy==2.1.1

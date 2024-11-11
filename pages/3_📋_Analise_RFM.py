@@ -23,9 +23,39 @@ ico_path = os.path.join(parent_dir, "favicon.ico")
     #return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def format_currency_br(value):
-    if pd.isna(value):
-        return "-"
-    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    """
+    Formata valor monetário com tratamento robusto para valores nulos
+    """
+    try:
+        if pd.isna(value) or value is None:
+            return "R$ 0,00"
+        
+        # Converter string para float se necessário
+        if isinstance(value, str):
+            value = value.replace('R$', '').replace('.', '').replace(',', '.').strip()
+            value = float(value) if value else 0
+            
+        value = float(value)
+        return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except:
+        return "R$ 0,00"
+
+def format_numeric(value, decimal_places=0):
+    """
+    Formata valor numérico com tratamento robusto para valores nulos
+    """
+    try:
+        if pd.isna(value) or value is None:
+            return "0"
+            
+        # Converter para float e depois para o formato desejado
+        value = float(value)
+        if decimal_places == 0:
+            return f"{int(value):,}".replace(",", ".")
+        else:
+            return f"{value:,.{decimal_places}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except:
+        return "0"
 
 def convert_to_number(value):
     """Converte valores para número, tratando tanto strings quanto números"""
@@ -266,42 +296,50 @@ Segmentação dos Clientes:
     . "Potencial" --> são clientes que compraram nos últimos 3 meses ou mais recentemente, com boa frequência e valor médio-alto de compras. Eles podem ser alvos para estratégias de upselling.
                 """)
 
-        st.subheader("Clientes por Segmento RFM")
-        # Seleção do tipo de filtro
-        filtro_tipo = st.radio(
-            "Selecione o tipo de filtro:",
-            ["Por Segmento", "Por Recência"],
-            horizontal=True
+    st.subheader("Clientes por Segmento RFM")
+    # Seleção do tipo de filtro
+    filtro_tipo = st.radio(
+        "Selecione o tipo de filtro:",
+        ["Por Segmento", "Por Recência"],
+        horizontal=True
+    )
+
+    # Inicializar variáveis
+    modo_selecao = None
+    selecao = None
+    recencias_selecionadas = []  # Inicializar aqui
+
+    if filtro_tipo == "Por Segmento":
+        segmentos = ['Todos', 'Campeões', 'Clientes fiéis', 'Novos clientes', 'Perdidos', 'Atenção', 'Em risco', 'Potencial', 'Acompanhar']
+        segmentos_selecionados = st.multiselect("Selecione os segmentos", options=segmentos, default=['Atenção','Em risco'])
+        modo_selecao = "segmento"
+        selecao = segmentos_selecionados
+    else:  # Por Recência
+        recencias = [0, 1, 2, 3, 4, 5, 6, 'Maior que 6']
+        recencias_selecionadas = st.multiselect(
+            "Selecione os meses de recência",
+            options=recencias,
+            default=[3,4,5],
+            help="0 = Mês atual, 1 = Mês anterior, etc."
         )
+        modo_selecao = "recencia"
+        selecao = recencias_selecionadas
 
-        if filtro_tipo == "Por Segmento":
-            segmentos = ['Todos', 'Campeões', 'Clientes fiéis', 'Novos clientes', 'Perdidos', 'Atenção', 'Em risco', 'Potencial', 'Acompanhar']
-            segmentos_selecionados = st.multiselect("Selecione os segmentos", options=segmentos, default=['Atenção','Em risco'])
-            modo_selecao = "segmento"
-            selecao = segmentos_selecionados
-        else:
-            recencias = [0, 1, 2, 3, 4, 5, 6, 'Maior que 6']
-            recencias_selecionadas = st.multiselect(
-                "Selecione os meses de recência",
-                options=recencias,
-                default=[3,4,5],
-                help="0 = Mês atual, 1 = Mês anterior, etc."
-            )
-            modo_selecao = "recencia"
-            selecao = recencias_selecionadas
-
-        apenas_inadimplentes = st.checkbox("Mostrar apenas clientes inadimplentes")
+    apenas_inadimplentes = st.checkbox("Mostrar apenas clientes inadimplentes")
 
         # Verifica se houve mudança na seleção
-        if ('last_selecao' not in st.session_state or 
+    if ('last_selecao' not in st.session_state or 
             st.session_state.get('last_selecao') != selecao or 
             st.session_state.get('last_modo') != modo_selecao):
-            st.session_state['data_needs_update'] = True
-            st.session_state['last_selecao'] = selecao
-            st.session_state['last_modo'] = modo_selecao
+        
+        st.session_state['data_needs_update'] = True
+        st.session_state['last_selecao'] = selecao
+        st.session_state['last_modo'] = modo_selecao
 
-        if st.session_state.get('data_needs_update', True):
-            with st.spinner('Carregando clientes...'):
+    # Carrega os dados se necessário
+    if st.session_state.get('data_needs_update', True):
+        with st.spinner('Carregando clientes...'):
+            try:
                 if modo_selecao == "segmento":
                     clientes = get_rfm_segment_clients(
                         st.session_state['cod_colaborador'],
@@ -313,7 +351,7 @@ Segmentação dos Clientes:
                         st.session_state['selected_colaboradores'],
                         st.session_state['selected_teams']
                     )
-                else:
+                else:  # modo_selecao == "recencia"
                     clientes = get_recency_clients(
                         st.session_state['cod_colaborador'],
                         st.session_state['start_date'],
@@ -326,49 +364,65 @@ Segmentação dos Clientes:
                     )
                 st.session_state['clientes_filtrados'] = clientes
                 st.session_state['data_needs_update'] = False
+            except Exception as e:
+                logging.error(f"Erro ao carregar clientes: {str(e)}")
+                st.error("Erro ao carregar dados dos clientes")
+                return
+    else:
+        clientes = st.session_state.get('clientes_filtrados')
+
+    # Processar e exibir os dados (movido para fora do else)
+    if clientes is not None and not clientes.empty:
+        # Aplicar o filtro de inadimplentes, se necessário
+        if apenas_inadimplentes:
+            clientes_filtrados = clientes[clientes['status_inadimplente'] == 'Inadimplente']
         else:
-            clientes = st.session_state['clientes_filtrados']
+            clientes_filtrados = clientes
 
-        if clientes is not None and not clientes.empty:
-            # Aplicar o filtro de inadimplentes, se necessário
-            if apenas_inadimplentes:
-                clientes_filtrados = clientes[clientes['status_inadimplente'] == 'Inadimplente']
-            else:
-                clientes_filtrados = clientes
+        if not clientes_filtrados.empty:
+            # Garantir que não há valores None antes da formatação
+            for col in ['Recencia', 'Positivacao', 'qtd_titulos']:
+                clientes_filtrados[col] = pd.to_numeric(clientes_filtrados[col], errors='coerce').fillna(0)
 
-            if not clientes_filtrados.empty:
-                st.write(f"Clientes {'dos segmentos' if modo_selecao == 'segmento' else 'com recência'}: {', '.join(map(str, selecao))}")
-                if apenas_inadimplentes:
-                    st.write("(Apenas clientes inadimplentes)")
+            for col in ['Monetario', 'ticket_medio_posit', 'vlr_inadimplente']:
+                clientes_filtrados[col] = clientes_filtrados[col].apply(lambda x: convert_to_number(x) if x is not None else 0)
 
-                # Converter valores para numérico para garantir ordenação correta
-                for col in ['Monetario', 'ticket_medio_posit', 'vlr_inadimplente']:
-                    clientes_filtrados[col] = clientes_filtrados[col].apply(convert_to_number)
+            # Configurar o DataFrame
+            formatted_df = clientes_filtrados[[
+                'Cod_Cliente', 'Nome_Cliente', 'Vendedor', 'Canal_Venda', 
+                'uf_empresa', 'Recencia', 'Positivacao', 'Monetario', 
+                'ticket_medio_posit', 'marcas', 'Mes_Ultima_Compra',
+                'qtd_titulos', 'vlr_inadimplente', 'status_inadimplente'
+            ]].copy()
 
-                # Configurar o DataFrame com formatação usando style
-                formatted_df = clientes_filtrados[[
-                    'Cod_Cliente', 'Nome_Cliente', 'Vendedor', 'Canal_Venda', 
-                    'uf_empresa', 'Recencia', 'Positivacao', 'Monetario', 
-                    'ticket_medio_posit', 'marcas', 'Mes_Ultima_Compra',
-                    'qtd_titulos', 'vlr_inadimplente', 'status_inadimplente'
-                ]].set_index('Cod_Cliente')
+            # Aplicar formatação com funções mais robustas
+            try:
+                styled_df = formatted_df.style.format({
+                    'Monetario': lambda x: format_currency_br(x),
+                    'ticket_medio_posit': lambda x: format_currency_br(x),
+                    'vlr_inadimplente': lambda x: format_currency_br(x),
+                    'Recencia': lambda x: format_numeric(x),
+                    'Positivacao': lambda x: format_numeric(x),
+                    'qtd_titulos': lambda x: format_numeric(x)
+                })
 
+                # Exibir o DataFrame
                 st.dataframe(
-                    formatted_df.style.format({
-                        'Monetario': format_currency_br,
-                        'ticket_medio_posit': format_currency_br,
-                        'vlr_inadimplente': format_currency_br,
-                        'Recencia': '{:.0f}',
-                        'Positivacao': '{:.0f}',
-                        'qtd_titulos': '{:.0f}'
-                    })
+                    styled_df,
+                    use_container_width=True
                 )
+                
+            except Exception as e:
+                logging.error(f"Erro na formatação do DataFrame: {str(e)}")
+                # Fallback para exibição sem formatação
+                st.write("Exibindo dados sem formatação devido a erro:")
+                st.dataframe(formatted_df)
 
-                st.write(f"Total de clientes exibidos: {len(clientes_filtrados)}")
-            else:
-                st.warning("Não há clientes que atendam aos critérios selecionados.")
+            st.write(f"Total de clientes exibidos: {len(clientes_filtrados)}")
         else:
-            st.warning("Não há clientes para os filtros selecionados.")
+            st.warning("Não há clientes que atendam aos critérios selecionados.")
+    else:
+        st.warning("Não há clientes para os filtros selecionados.")
 
 
 
