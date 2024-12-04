@@ -106,3 +106,5 @@ virtualenv==20.26.4
 watchdog==4.0.2
 wcwidth==0.2.13
 Werkzeug==3.0.4
+google-auth-oauthlib
+google-api-python-client

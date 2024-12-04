@@ -39,6 +39,9 @@ ATHENA_REGION = os.environ.get('ATHENA_REGION', 'us-east-1')
 logging.info(f"Usando ATHENA_S3_STAGING_DIR: {ATHENA_S3_STAGING_DIR}")
 logging.info(f"Usando ATHENA_REGION: {ATHENA_REGION}")
 
+
+
+
 def format_filter(items, column):
     if items:
         formatted_items = ", ".join(f"'{item}'" for item in items)
@@ -112,7 +115,6 @@ def get_empresas_from_database():
     logging.info(f"Empresas obtidas do banco de dados: {empresas}")
     return empresas
 
-
 def get_canais_venda():
     # Assumindo que os canais de venda são fixos
     return ['VAREJO', 'SALÃO']
@@ -178,9 +180,22 @@ def query_athena(query):
         return pd.DataFrame()   
 
 # Funções cacheadas
-@st.cache_data
-def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
-    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams)
+@st.cache_data(ttl=3600)
+def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, 
+                             selected_brands, selected_nome_colaborador, selected_teams):
+    # Os filtros serão acessados diretamente do session_state dentro da função get_monthly_revenue
+    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, 
+                             selected_ufs, selected_brands, selected_nome_colaborador, 
+                             selected_teams)
+
+@st.cache_data(ttl=3600)
+def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, 
+                         selected_ufs, selected_nome_colaborador, selected_teams):
+    # Adicionar os filtros de carteira/pedido como parte da chave do cache
+    filtro_carteira = st.session_state.get('filtro_carteira', True)
+    filtro_pedido = st.session_state.get('filtro_pedido', False)
+    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, 
+                         selected_ufs, selected_nome_colaborador, selected_teams)
 
 @st.cache_data
 def get_unique_customers_period_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
@@ -191,16 +206,16 @@ def get_unique_customers_period_cached(cod_colaborador, start_date, end_date, se
 def get_abc_curve_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
     return get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams)
 
-@st.cache_data
-def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
-    logging.info(f"Chamando get_brand_data_cached com os seguintes parâmetros:")
-    logging.info(f"cod_colaborador: {cod_colaborador}")
-    logging.info(f"start_date: {start_date}")
-    logging.info(f"end_date: {end_date}")
-    logging.info(f"selected_channels: {selected_channels}")
-    logging.info(f"selected_ufs: {selected_ufs}")
-    logging.info(f"selected_nome_colaborador: {selected_nome_colaborador}")
-    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams)
+#@st.cache_data
+#def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
+    #logging.info(f"Chamando get_brand_data_cached com os seguintes parâmetros:")
+    #logging.info(f"cod_colaborador: {cod_colaborador}")
+    #logging.info(f"start_date: {start_date}")
+    #logging.info(f"end_date: {end_date}")
+    #logging.info(f"selected_channels: {selected_channels}")
+    #logging.info(f"selected_ufs: {selected_ufs}")
+    #logging.info(f"selected_nome_colaborador: {selected_nome_colaborador}")
+    #return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams)
 
 @st.cache_data
 def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
@@ -807,14 +822,25 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
         uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{ufs_str}')"
     
     # Filtro e colunas adicionais para colaborador específico
-    if cod_colaborador or selected_nome_colaborador:
-        colaborador_filter = ""
-        if cod_colaborador:
-            colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
-        elif selected_nome_colaborador:
-            # Apenas aplique o filtro de nome se não houver um código de colaborador
-            nome_str = "', '".join(selected_nome_colaborador)
-            colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"    
+    if cod_colaborador:
+        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_nome_colaborador:
+        nome_str = "', '".join(selected_nome_colaborador)
+        conditions = []
+        
+        # Acessar os valores do session_state dentro da função
+        filtro_carteira = st.session_state.get('filtro_carteira', True)
+        filtro_pedido = st.session_state.get('filtro_pedido', False)
+        
+        if filtro_carteira:
+            conditions.append(f"empresa_pedido.nome_colaborador_atual IN ('{nome_str}')")
+        if filtro_pedido:
+            conditions.append(f"empresa_pedido.nome_colaborador_pedido IN ('{nome_str}')")
+        
+        if conditions:
+            colaborador_filter = f"AND ({' OR '.join(conditions)})"
+        else:
+            colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
        
         group_by_cols = "1, 2, 3, fator"
         group_by_cols_acum = " 1,2,3"
@@ -1066,7 +1092,13 @@ def get_unique_customers_period(cod_colaborador, start_date, end_date, selected_
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        #colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        colaborador_filter = build_colaborador_filter(
+            cod_colaborador, 
+            selected_nome_colaborador,
+            st.session_state.get('filtro_carteira', True),
+            st.session_state.get('filtro_pedido', False)
+        )
 
     channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
@@ -1121,7 +1153,13 @@ def get_weighted_markup(cod_colaborador, start_date, end_date, selected_channels
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        #colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        colaborador_filter = build_colaborador_filter(
+            cod_colaborador, 
+            selected_nome_colaborador,
+            st.session_state.get('filtro_carteira', True),
+            st.session_state.get('filtro_pedido', False)
+        )
 
     if selected_channels:
         channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')"
@@ -1228,6 +1266,28 @@ def get_weighted_markup(cod_colaborador, start_date, end_date, selected_channels
 def format_date(date_obj):
     return date_obj.strftime('%Y-%m-%d') if date_obj else None
 
+def build_colaborador_filter(cod_colaborador, selected_nome_colaborador, filtro_carteira=True, filtro_pedido=False):
+    """
+    Constrói o filtro SQL para colaboradores baseado nas seleções do usuário
+    """
+    if cod_colaborador:
+        return f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_nome_colaborador:
+        nome_str = "', '".join(selected_nome_colaborador)
+        conditions = []
+        
+        if filtro_carteira:
+            conditions.append(f"nome_colaborador_atual IN ('{nome_str}')")
+        if filtro_pedido:
+            conditions.append(f"nome_colaborador_pedido IN ('{nome_str}')")
+        
+        if conditions:
+            return f"AND ({' OR '.join(conditions)})"
+        else:
+            # Fallback para evitar SQL inválido
+            return f"AND nome_colaborador_atual IN ('{nome_str}')"
+    return ""
+
 def get_unique_customers_by_granularity(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, 
                                       selected_brands, selected_nome_colaborador, selected_teams, granularity='Mensal'):
     """
@@ -1242,7 +1302,13 @@ def get_unique_customers_by_granularity(cod_colaborador, start_date, end_date, s
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        #colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        colaborador_filter = build_colaborador_filter(
+            cod_colaborador, 
+            selected_nome_colaborador,
+            st.session_state.get('filtro_carteira', True),
+            st.session_state.get('filtro_pedido', False)
+        )
 
     if selected_channels:
         channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')"
@@ -1357,14 +1423,25 @@ def get_unique_customers_by_granularity(cod_colaborador, start_date, end_date, s
 
 def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador, selected_teams):
     colaborador_filter = ""
-    if isinstance(selected_nome_colaborador, str):  # Para vendedores
-        colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{selected_nome_colaborador}'"
-    elif selected_nome_colaborador:  # Para admin/gestor
-        # Corrigido para garantir que cada colaborador tenha aspas simples corretamente
-        colaboradores = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{colaboradores}') OR empresa_pedido.nome_colaborador_pedido IN ('{colaboradores}') )"
-    elif cod_colaborador:
+    if cod_colaborador:
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
+    elif selected_nome_colaborador:
+        nome_str = "', '".join(selected_nome_colaborador)
+        conditions = []
+        
+        # Pegar os valores do session_state dentro da função
+        filtro_carteira = st.session_state.get('filtro_carteira', True)
+        filtro_pedido = st.session_state.get('filtro_pedido', False)
+        
+        if filtro_carteira:
+            conditions.append(f"empresa_pedido.nome_colaborador_atual IN ('{nome_str}')")
+        if filtro_pedido:
+            conditions.append(f"empresa_pedido.nome_colaborador_pedido IN ('{nome_str}')")
+        
+        if conditions:
+            colaborador_filter = f"AND ({' OR '.join(conditions)})"
+        else:
+            colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
 
     channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
     uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
@@ -2102,7 +2179,13 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
     elif selected_nome_colaborador:
         # Apenas aplique o filtro de nome se não houver um código de colaborador
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND ( vw_distribuicao_empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR vw_distribuicao_empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        #colaborador_filter = f"AND ( vw_distribuicao_empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR vw_distribuicao_empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        colaborador_filter = build_colaborador_filter(
+            cod_colaborador, 
+            selected_nome_colaborador,
+            st.session_state.get('filtro_carteira', True),
+            st.session_state.get('filtro_pedido', False)
+        )
         
   
     channel_filter = ""

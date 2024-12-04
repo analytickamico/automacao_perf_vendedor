@@ -31,6 +31,9 @@ current_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(current_dir)
 ico_path = os.path.join(parent_dir, "favicon.ico")
 
+# Configuração da página deve vir antes de qualquer outro comando st
+st.set_page_config(page_title="Performance de Vendas", layout="wide", page_icon=ico_path)
+
 # Configurar o locale para português do Brasil
 try:
     locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
@@ -167,17 +170,22 @@ def process_data_by_granularity(df, granularity):
         return pd.DataFrame()
 
 
-    
 @st.cache_data(ttl=3600)
-def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
-    channel_filter = f"AND pedidos.canal_venda IN ('{', '.join(selected_channels)}')" if selected_channels else ""
-    uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{', '.join(selected_ufs)}')" if selected_ufs else ""
-    brand_filter = f"AND item_pedidos.marca IN ('{', '.join(selected_brands)}')" if selected_brands else ""
-    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams)
+def get_monthly_revenue_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, 
+                             selected_brands, selected_nome_colaborador, selected_teams):
+    # Os filtros serão acessados diretamente do session_state dentro da função get_monthly_revenue
+    return get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, 
+                             selected_ufs, selected_brands, selected_nome_colaborador, 
+                             selected_teams)
 
-@st.cache_data(ttl=3600, max_entries=100)
-def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams):
-    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_nome_colaborador,selected_teams)
+@st.cache_data(ttl=3600)
+def get_brand_data_cached(cod_colaborador, start_date, end_date, selected_channels, 
+                         selected_ufs, selected_nome_colaborador, selected_teams):
+    # Adicionar os filtros de carteira/pedido como parte da chave do cache
+    filtro_carteira = st.session_state.get('filtro_carteira', True)
+    filtro_pedido = st.session_state.get('filtro_pedido', False)
+    return get_brand_data(cod_colaborador, start_date, end_date, selected_channels, 
+                         selected_ufs, selected_nome_colaborador, selected_teams)
 
 @st.cache_data(ttl=3600)
 def get_channels_and_ufs_cached(cod_colaborador, start_date, end_date):
@@ -243,7 +251,6 @@ def load_filters():
     logging.info("Iniciando load_filters")
     initialize_session_state()
 
-    #user = st.session_state.get('user', {})
     user = st.session_state['user']
     user_role = user.get('role')
     logging.info(f"Papel do usuário: {user_role}")
@@ -253,8 +260,6 @@ def load_filters():
     
     st.session_state.filter_options['equipes'] = static_data.get('equipes', [])
     st.session_state.filter_options['colaboradores'] = static_data.get('colaboradores', [])
-    logging.info(f"Equipes carregadas: {len(st.session_state.filter_options['equipes'])}")
-    logging.info(f"Colaboradores carregados: {len(st.session_state.filter_options['colaboradores'])}")
     
     # Atualizar filter_options com os dados estáticos
     st.session_state.filter_options['channels'] = static_data.get('canais_venda', [])
@@ -262,31 +267,39 @@ def load_filters():
     st.session_state.filter_options['brands'] = static_data.get('marcas', [])
     st.session_state.filter_options['equipes'] = static_data.get('equipes', [])
 
-    st.session_state['start_date'] = st.sidebar.date_input("Data Inicial", st.session_state.get('start_date'))
-    st.session_state['end_date'] = st.sidebar.date_input("Data Final", st.session_state.get('end_date'))
+    st.session_state['start_date'] = st.sidebar.date_input(
+        "Data Inicial", 
+        st.session_state.get('start_date'),
+        key='start_date_input'
+    )
+    st.session_state['end_date'] = st.sidebar.date_input(
+        "Data Final", 
+        st.session_state.get('end_date'),
+        key='end_date_input'
+    )
     
-    # Usar dados estáticos para canais de venda
+    # Canais de Venda
     st.session_state.selected_channels = st.sidebar.multiselect(
         "Canais de Venda", 
         options=st.session_state.filter_options['channels'],
-        default=st.session_state.get('selected_channels', [])
+        default=st.session_state.get('selected_channels', []),
+        key='channels_multiselect'
     )
     
-    # Usar dados estáticos para UFs
+    # UFs
     st.session_state.selected_ufs = st.sidebar.multiselect(
         "UFs", 
         options=st.session_state.filter_options['ufs'],
-        default=st.session_state.get('selected_ufs', [])
+        default=st.session_state.get('selected_ufs', []),
+        key='ufs_multiselect'
     )
     
-    # Usar dados estáticos para marcas
-    #st.session_state.selected_brands = st.sidebar.multiselect(
-        #"Marcas", 
-        #options=st.session_state.filter_options['brands'],
-        #default=st.session_state.get('selected_brands', [])
-    #)
-    # Opção para selecionar todas as marcas
-    all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
+    # Marcas
+    all_brands_selected = st.sidebar.checkbox(
+        "Selecionar Todas as Marcas",
+        value=False,
+        key='all_brands_checkbox'
+    )
 
     with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
         if all_brands_selected:
@@ -294,11 +307,11 @@ def load_filters():
         else:
             default_brands = st.session_state.get('selected_brands', [])
 
-        # Multiselect para marcas com opção de exclusão
         selected_brands = st.multiselect(
             "Marcas (desmarque para excluir)",
             options=st.session_state.filter_options['brands'],
-            default=default_brands
+            default=default_brands,
+            key='brands_multiselect'
         )
 
     # Atualizar as marcas selecionadas
@@ -316,63 +329,75 @@ def load_filters():
         else:
             st.sidebar.write("Todas as marcas estão selecionadas")
 
-
-    logging.info(f"Papel do usuário: {user_role}")
+    # Filtros específicos para admin/gestor
     if user_role in ['admin', 'gestor']:
         logging.info("Usuário é admin ou gestor, exibindo filtro de equipes")
         equipes_options = st.session_state.filter_options['equipes']
+        
         if equipes_options:
             st.session_state.selected_teams = st.sidebar.multiselect(
                 "Equipes", 
                 options=equipes_options,
-                default=st.session_state.get('selected_teams', [])
+                default=st.session_state.get('selected_teams', []),
+                key='teams_multiselect'
             )
-            logging.info(f"Equipes selecionadas: {st.session_state.selected_teams}")
-        else:
-            logging.warning("Nenhuma opção de equipe disponível para exibição")
-        
         # Filtro de colaboradores
-        logging.info("Exibindo filtro de colaboradores")
         colaboradores_options = st.session_state.filter_options['colaboradores']
         if colaboradores_options:
             st.session_state.selected_colaboradores = st.sidebar.multiselect(
                 "Colaboradores", 
                 options=colaboradores_options,
-                default=st.session_state.get('selected_colaboradores', [])
+                default=st.session_state.get('selected_colaboradores', []),
+                key='colaboradores_multiselect'
+            )    
+        previous_carteira = st.session_state.get('previous_filtro_carteira', True)
+        previous_pedido = st.session_state.get('previous_filtro_pedido', False)
+        
+        # Checkboxes para tipo de filtro de colaborador
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            st.session_state['filtro_carteira'] = st.checkbox(
+                'Carteira', 
+                value=st.session_state.get('filtro_carteira', True),
+                key='carteira_checkbox'
             )
-            logging.info(f"Colaboradores selecionados: {st.session_state.selected_colaboradores}")
-        else:
-            logging.warning("Nenhuma opção de colaborador disponível para exibição")
-    else:
-        logging.info("Usuário não é admin ou gestor, filtros de equipes e colaboradores não serão exibidos")
+        with col2:
+            st.session_state['filtro_pedido'] = st.checkbox(
+                'Pedido', 
+                value=st.session_state.get('filtro_pedido', False),
+                key='pedido_checkbox'
+            )
+        
+        # Se houve mudança nos checkboxes, limpar cache relevante
+        if (previous_carteira != st.session_state['filtro_carteira'] or 
+            previous_pedido != st.session_state['filtro_pedido']):
+            st.cache_data.clear()  # Isso já limpa todo o cache
+            # Não precisa chamar clear() individualmente para cada função
+            load_data()  # Recarregar os dados
+            
+        # Atualizar estado anterior
+        st.session_state['previous_filtro_carteira'] = st.session_state['filtro_carteira']
+        st.session_state['previous_filtro_pedido'] = st.session_state['filtro_pedido']
+            
+        if not st.session_state['filtro_carteira'] and not st.session_state['filtro_pedido']:
+            st.sidebar.warning("Selecione pelo menos um tipo de filtro")
+            st.session_state['filtro_carteira'] = True
 
-
-      
-    if user_role not in ['admin', 'gestor']:
-        st.session_state['cod_colaborador'] = st.sidebar.text_input("Código do Colaborador (deixe em branco para todos)", st.session_state.get('cod_colaborador', ''))
     elif user_role == 'vendedor':
+        st.session_state['cod_colaborador'] = st.sidebar.text_input(
+            "Código do Colaborador",
+            value=st.session_state.get('cod_colaborador', ''),
+            key='cod_colaborador_input'
+        )
         st.sidebar.info(f"Código do Colaborador: {st.session_state.get('cod_colaborador', '')}")
 
-    
-    # Carregar opções de filtro apenas se necessário
-    if 'filter_options' not in st.session_state:
-        #channels, ufs = get_channels_and_ufs_cached(st.session_state.get('cod_colaborador', ''), st.session_state['start_date'], st.session_state['end_date'])
-        #brand_options = get_brand_options(st.session_state['start_date'], st.session_state['end_date'])
-        #team_options = get_team_options()
-        colaboradores = get_colaboradores_cached(st.session_state['start_date'], st.session_state['end_date'], None, None)
-        colaboradores_options = colaboradores['nome_colaborador'].tolist() if not colaboradores.empty else []
-        
-        st.session_state['filter_options'] = {
-            #'channels': channels,
-            #'ufs': ufs,
-            #'brands': brand_options,
-            #'teams': team_options,
-            'colaboradores': colaboradores_options
-        }
-
-    if st.sidebar.button("Atualizar Dados"):
+    if st.sidebar.button("Atualizar Dados", key='update_button'):
         load_data()
-        st.rerun()  # Isso fará com que a página seja recarregada com os novos dados
+        st.rerun()
+        
+    # Verificação inicial de dados
+    #if 'df' not in st.session_state or st.session_state.get('df') is None:
+        #st.warning("Nenhum dado carregado. Por favor, selecione os filtros e clique em 'Atualizar Dados'.")
 
 def load_data():
     progress_text = "Operação em andamento. Aguarde..."
@@ -926,7 +951,6 @@ def main():
             st.warning("Por favor, faça login na página inicial para acessar esta página.")
             return
 
-        st.set_page_config(page_title="Performance de Vendas", layout="wide", page_icon=ico_path)
         st.sidebar.title('Filtros')
         load_filters()
         create_dashboard()
