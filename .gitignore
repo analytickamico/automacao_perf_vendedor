@@ -131,4 +131,5 @@ data/
 # diretorios e arquivos outros assuntos
 
 pdfs_baixados/
-.extrai_nota_pdf.py
+.extrai_nota_pdf.pyservice-account.json
+credentials.json
