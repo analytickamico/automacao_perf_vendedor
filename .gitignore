@@ -122,6 +122,10 @@ Thumbs.db
 # Arquivos de log
 *.log
 
+*.xlsx
+*.html
+*.csv
+
 data/
 
 # diretorios e arquivos outros assuntos

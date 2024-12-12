@@ -1591,7 +1591,7 @@ def get_rfm_summary(cod_colaborador, start_date, end_date, selected_channels, se
             a.Monetario,
             b.cod_colaborador_atual
         FROM
-            "databeautykami".vw_analise_perfil_cliente a
+            "databeautykami".vw_analise_perfil_cliente_V2 a
         LEFT JOIN
             "databeautykami".vw_distribuicao_cliente_vendedor b ON a.Cod_Cliente = b.cod_cliente
         
@@ -1713,7 +1713,7 @@ def get_rfm_segment_clients(cod_colaborador, start_date, end_date, segmentos, se
             c.qtd_titulos,
             c.vlr_inadimplente
         FROM
-            "databeautykami".vw_analise_perfil_cliente a
+            "databeautykami".vw_analise_perfil_cliente_V2 a
         LEFT JOIN "databeautykami".vw_distribuicao_cliente_vendedor b 
             ON a.Cod_Cliente = b.cod_cliente
         LEFT JOIN "databeautykami".tbl_distribuicao_clientes_inadimplentes c 
@@ -1882,7 +1882,7 @@ def get_recency_clients(cod_colaborador, start_date, end_date, recencias, select
             c.qtd_titulos,
             c.vlr_inadimplente
         FROM
-            "databeautykami".vw_analise_perfil_cliente a
+            "databeautykami"._V2 a
         LEFT JOIN "databeautykami".vw_distribuicao_cliente_vendedor b 
             ON a.Cod_Cliente = b.cod_cliente
         LEFT JOIN "databeautykami".tbl_distribuicao_clientes_inadimplentes c 
@@ -1971,7 +1971,7 @@ def get_rfm_heatmap_data(cod_colaborador, start_date, end_date, selected_channel
             a.Recencia,
             a.Positivacao AS Frequencia
         FROM
-            "databeautykami".vw_analise_perfil_cliente a
+            "databeautykami".vw_analise_perfil_cliente_V2 a
         LEFT JOIN
             "databeautykami".vw_distribuicao_cliente_vendedor b ON a.Cod_Cliente = b.cod_cliente
                     
