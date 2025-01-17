@@ -9,6 +9,7 @@ import logging
 import numpy as np
 from datetime import datetime, timedelta
 import time
+from io import BytesIO
 
 logging.basicConfig(level=logging.INFO)
 
@@ -194,6 +195,12 @@ def identify_outliers(df, column, factor=1.5):
 def main():
     init_session_state()
     load_page_specific_state("Estoque_Analise")
+
+    if 'produtos_criticos_state' not in st.session_state:
+        st.session_state.produtos_criticos_state = {
+            'df_display': None,
+            'output': None
+        }
 
     if not st.session_state.get('logged_in', False):
         st.warning("Por favor, faça login na página inicial para acessar esta página.")
@@ -611,11 +618,14 @@ def main():
                 st.markdown('<div class="custom-dataframe-container">', unsafe_allow_html=True)
                 produtos_criticos = abc_data[(abc_data['curva'] == 'A') & (abc_data['classificacao_giro'] == 'Baixo')]
                 numeric_columns = ['valor_estoque', 'saldo_estoque', 'giro_anual', 'cobertura_dias', 'quantidade_vendida', 'quantidade_bonificada']
-    
-                st.dataframe(
-                    produtos_criticos[['sku', 'nome_produto', 'marca'] + numeric_columns]
-                    .sort_values('valor_estoque', ascending=False)
-                    .style.format({
+                
+                # Criar o DataFrame formatado para exibição
+            df_display = produtos_criticos[['sku', 'nome_produto', 'marca'] + numeric_columns].sort_values('valor_estoque', ascending=False)
+            st.session_state.produtos_criticos_state['df_display'] = df_display
+
+                # Exibir o DataFrame
+            st.dataframe(
+                    df_display.style.format({
                         'valor_estoque': lambda x: f"R$ {format_brazilian(x, 2)}",
                         'saldo_estoque': lambda x: format_brazilian(x, 0),
                         'giro_anual': lambda x: format_brazilian(x, 2),
@@ -639,7 +649,69 @@ def main():
                         "quantidade_bonificada": st.column_config.NumberColumn("Qtd. Bonificada", format="%d")
                     }
                 )
-                st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+                # Preparar o Excel para download
+            def generate_excel_report(df_display):
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    # Aba principal com todos os produtos críticos
+                    df_display.to_excel(writer, sheet_name='Todos Produtos Críticos', index=False)
+                    
+                    # Configurando a primeira aba
+                    worksheet = writer.sheets['Todos Produtos Críticos']
+                    workbook = writer.book
+                    
+                    # Criando formatos diferentes para valores monetários e quantidades
+                    formato_monetario = workbook.add_format({'num_format': '#.##0,00'})  # Duas casas decimais
+                    formato_inteiro = workbook.add_format({'num_format': '#.##0'})       # Zero casas decimais
+                    formato_giro = workbook.add_format({'num_format': '#.##0,00'})       # Duas casas decimais para giro
+                    
+                    # Ajustando larguras e formatação
+                    for idx, col in enumerate(df_display.columns):
+                        max_length = max(df_display[col].astype(str).apply(len).max(), len(col))
+                        worksheet.set_column(idx, idx, max_length + 2)
+                        
+                        if col == 'valor_estoque':
+                            worksheet.set_column(idx, idx, None, formato_monetario)
+                        elif col in ['saldo_estoque', 'cobertura_dias', 'quantidade_vendida', 'quantidade_bonificada']:
+                            worksheet.set_column(idx, idx, None, formato_inteiro)
+                        elif col == 'giro_anual':
+                            worksheet.set_column(idx, idx, None, formato_giro)
+                    
+                    # Criando abas por marca
+                    marcas = df_display['marca'].unique()
+                    for marca in marcas:
+                        df_marca = df_display[df_display['marca'] == marca]
+                        sheet_name = f'Produtos {marca}'
+                        df_marca.to_excel(writer, sheet_name=sheet_name, index=False)
+                        
+                        worksheet_marca = writer.sheets[sheet_name]
+                        
+                        for idx, col in enumerate(df_marca.columns):
+                            max_length = max(df_marca[col].astype(str).apply(len).max(), len(col))
+                            worksheet_marca.set_column(idx, idx, max_length + 2)
+                            
+                            if col == 'valor_estoque':
+                                worksheet_marca.set_column(idx, idx, None, formato_monetario)
+                            elif col in ['saldo_estoque', 'cobertura_dias', 'quantidade_vendida', 'quantidade_bonificada']:
+                                worksheet_marca.set_column(idx, idx, None, formato_inteiro)
+                            elif col == 'giro_anual':
+                                worksheet_marca.set_column(idx, idx, None, formato_giro)
+
+                return output.getvalue()
+
+            # E então no seu código principal:
+            #if st.button('Gerar Relatório Excel'):
+                #excel_data = generate_excel_report(df_display)
+                #st.download_button(
+                    #label="📥 Baixar tabela em Excel",
+                    #data=excel_data,
+                    #file_name="produtos_criticos.xlsx",
+                    #mime="application/vnd.ms-excel"
+               # )
+
+
 
             st.markdown("Resumo dos Produtos Críticos")
 

@@ -885,7 +885,7 @@ def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels
                 dt_faturamento,  -- Removemos o DATE_TRUNC
                 {select_cols_subquery}
                 CASE WHEN fator IS NULL Then ROUND(SUM(item_pedidos.preco_total), 2)
-                Else ROUND(SUM(item_pedidos.preco_total)/fator,2) END AS valor_bonificacao_ajustada
+                Else ROUND(SUM(item_pedidos.preco_total)/1,2) END AS valor_bonificacao_ajustada
             FROM
                 "databeautykami"."vw_distribuicao_pedidos" pedidos
             LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
@@ -1000,7 +1000,7 @@ SELECT
                 cod_produto,
                 DATE_TRUNC('month', dt_faturamento) mes_ref,
                 CASE WHEN fator IS NULL Then ROUND(SUM(qtd * custo_unitario) / NULLIF(SUM(qtd), 0), 2)
-                Else ROUND(SUM(qtd * (custo_unitario/fator)) / NULLIF(SUM(qtd), 0), 2)  END custo_medio
+                Else ROUND(SUM(qtd * (custo_unitario/1)) / NULLIF(SUM(qtd), 0), 2)  END custo_medio
             FROM "databeautykami".tbl_varejo_cmv left join "databeautykami".tbl_distribuicao_bonificacao
             ON tbl_varejo_cmv.cod_marca = tbl_distribuicao_bonificacao.cod_marca
             and DATE_TRUNC('month', dt_faturamento) = date(tbl_distribuicao_bonificacao.mes_ref)
@@ -1011,7 +1011,7 @@ SELECT
                 codprod,
                 DATE_TRUNC('month', dtvenda) mes_ref,
                 CASE WHEN fator IS NULL Then ROUND(SUM(quant * custo) / NULLIF(SUM(quant), 0), 2)
-                Else ROUND(SUM(quant * (custo/fator)) / NULLIF(SUM(quant), 0), 2)  END custo_medio
+                Else ROUND(SUM(quant * (custo/1)) / NULLIF(SUM(quant), 0), 2)  END custo_medio
             FROM "databeautykami".tbl_salao_pedidos_salao left join "databeautykami".tbl_distribuicao_bonificacao
             ON DATE_TRUNC('month', dtvenda) = date(tbl_distribuicao_bonificacao.mes_ref)
             AND ( trim(upper(tbl_salao_pedidos_salao.categoria)) = trim(upper(tbl_distribuicao_bonificacao.marca))
@@ -1197,7 +1197,8 @@ def get_weighted_markup(cod_colaborador, start_date, end_date, selected_channels
                     DATE_TRUNC('month', dt_faturamento) mes_ref,
                     CASE 
                         WHEN fator IS NULL Then ROUND(SUM(qtd * custo_unitario) / NULLIF(SUM(qtd), 0), 2)
-                        Else ROUND(SUM(qtd * (custo_unitario/fator)) / NULLIF(SUM(qtd), 0), 2)  
+                        -- Else ROUND(SUM(qtd * (custo_unitario/1)) / NULLIF(SUM(qtd), 0), 2)  
+                        Else ROUND(SUM(qtd * (custo_unitario/1)) / NULLIF(SUM(qtd), 0), 2) 
                     END custo_medio
                 FROM "databeautykami".tbl_varejo_cmv 
                 LEFT JOIN "databeautykami".tbl_distribuicao_bonificacao
@@ -1211,7 +1212,7 @@ def get_weighted_markup(cod_colaborador, start_date, end_date, selected_channels
                     DATE_TRUNC('month', dtvenda) mes_ref,
                     CASE 
                         WHEN fator IS NULL Then ROUND(SUM(quant * custo) / NULLIF(SUM(quant), 0), 2)
-                        Else ROUND(SUM(quant * (custo/fator)) / NULLIF(SUM(quant), 0), 2)  
+                        Else ROUND(SUM(quant * (custo/1)) / NULLIF(SUM(quant), 0), 2)  
                     END custo_medio
                 FROM "databeautykami".tbl_salao_pedidos_salao 
                 LEFT JOIN "databeautykami".tbl_distribuicao_bonificacao
@@ -1483,7 +1484,7 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
                 upper(marca.desc_abrev) marca,
                 DATE_TRUNC('month', dt_faturamento) mes_ref,
                 CASE WHEN fator IS NULL Then ROUND(SUM(qtd * custo_unitario) / NULLIF(SUM(qtd), 0), 2)
-                Else ROUND(SUM(qtd * (custo_unitario/fator)) / NULLIF(SUM(qtd), 0), 2)  END custo_medio
+                Else ROUND(SUM(qtd * (custo_unitario/1)) / NULLIF(SUM(qtd), 0), 2)  END custo_medio
             FROM "databeautykami".tbl_varejo_cmv left join "databeautykami".tbl_distribuicao_bonificacao
                 ON tbl_varejo_cmv.cod_marca = tbl_distribuicao_bonificacao.cod_marca
                 and DATE_TRUNC('month', dt_faturamento) = date(tbl_distribuicao_bonificacao.mes_ref)
@@ -1496,7 +1497,8 @@ def get_brand_data(cod_colaborador, start_date, end_date, selected_channels, sel
                     upper(categoria) marca,
                     DATE_TRUNC('month', dtvenda) mes_ref,
                     CASE WHEN fator IS NULL Then ROUND(SUM(quant * custo) / NULLIF(SUM(quant), 0), 2)
-                    Else ROUND(SUM(quant * (custo/fator)) / NULLIF(SUM(quant), 0), 2)  END custo_medio
+                    -- Else ROUND(SUM(quant * (custo/fator)) / NULLIF(SUM(quant), 0), 2)  END custo_medio
+                    Else ROUND(SUM(quant * (custo/1)) / NULLIF(SUM(quant), 0), 2)  END custo_medio
                 FROM "databeautykami".tbl_salao_pedidos_salao left join "databeautykami".tbl_distribuicao_bonificacao
                 ON DATE_TRUNC('month', dtvenda) = date(tbl_distribuicao_bonificacao.mes_ref)
                 AND ( trim(upper(tbl_salao_pedidos_salao.categoria)) = trim(upper(tbl_distribuicao_bonificacao.marca))
