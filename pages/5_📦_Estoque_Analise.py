@@ -843,20 +843,28 @@ def main():
             col3.metric("Valor Total em Estoque (Sem Vendas)", f"R$ {produtos_sem_vendas['valor_total_estoque'].sum():,.2f}")
 
             # Gráfico de barras das top 10 marcas com mais produtos sem vendas
+            # Gráfico de barras das top 10 marcas com mais produtos sem vendas
             top_marcas_sem_vendas = produtos_sem_vendas['marca'].value_counts().nlargest(10)
+            # Converter a Series para DataFrame
+            df_marcas_sem_vendas = pd.DataFrame({
+                'Marca': top_marcas_sem_vendas.index,
+                'Quantidade': top_marcas_sem_vendas.values
+            })
+
             fig_marcas = px.bar(
-                top_marcas_sem_vendas, 
-                x=top_marcas_sem_vendas.index, 
-                y=top_marcas_sem_vendas.values,
-                labels={'x': 'Marca', 'y': 'Quantidade de Produtos'},
+                df_marcas_sem_vendas,
+                x='Marca',
+                y='Quantidade',
                 title='Top 10 Marcas com Mais Produtos Sem Vendas',
-                text_auto=True  # Adiciona os valores diretamente nas barras
+                text='Quantidade'  # Mostra os valores nas barras
             )
 
             # Remover o eixo vertical (y-axis)
             fig_marcas.update_layout(
                 yaxis=dict(visible=False),  # Oculta o eixo y
             )
+
+            #st.plotly_chart(fig_marcas)
             
             # Exibir tabela de produtos sem vendas
             st.subheader("Detalhes dos Produtos Sem Vendas")

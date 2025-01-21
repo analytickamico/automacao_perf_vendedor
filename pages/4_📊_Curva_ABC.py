@@ -250,12 +250,20 @@ def create_dashboard():
         st.warning("Nenhum dado carregado. Por favor, escolha os filtros e acione Atualizar Dados.")
 
 def create_abc_chart(df):
+    # Ordenar o DataFrame por faturamento_liquido em ordem decrescente
+    df_sorted = df.sort_values('faturamento_liquido', ascending=False).copy()
+    
+    # Calcular o faturamento acumulado e percentual
+    df_sorted['faturamento_acumulado'] = df_sorted['faturamento_liquido'].cumsum()
+    total_faturamento = df_sorted['faturamento_liquido'].sum()
+    df_sorted['faturamento_acumulado_pct'] = df_sorted['faturamento_acumulado'] / total_faturamento
+
     fig = go.Figure()
 
     # Curva ABC principal
     fig.add_trace(go.Scatter(
-        x=df['faturamento_acumulado'], 
-        y=df['faturamento_liquido'], 
+        x=df_sorted['faturamento_acumulado_pct'], 
+        y=df_sorted['faturamento_liquido'], 
         mode='lines',
         name='Faturamento Acumulado'
     ))
@@ -263,9 +271,9 @@ def create_abc_chart(df):
     # Destacar top 10 de cada categoria
     colors = {'A': 'red', 'B': 'green', 'C': 'blue'}
     for curva in ['A', 'B', 'C']:
-        top_10 = df[df['curva'] == curva].head(10)
+        top_10 = df_sorted[df_sorted['curva'] == curva].head(10)
         fig.add_trace(go.Scatter(
-            x=top_10['faturamento_acumulado'], 
+            x=top_10['faturamento_acumulado_pct'], 
             y=top_10['faturamento_liquido'],
             mode='markers',
             name=f'Top 10 {curva}',
@@ -273,10 +281,18 @@ def create_abc_chart(df):
         ))
 
     # Linhas de 80% e 95%
-    fig.add_shape(type="line", x0=0.8, y0=0, x1=0.8, y1=df['faturamento_liquido'].max(), 
-                  line=dict(color="red", width=2, dash="dash"))
-    fig.add_shape(type="line", x0=0.95, y0=0, x1=0.95, y1=df['faturamento_liquido'].max(), 
-                  line=dict(color="green", width=2, dash="dash"))
+    fig.add_shape(
+        type="line", 
+        x0=0.8, y0=0, 
+        x1=0.8, y1=df_sorted['faturamento_liquido'].max(), 
+        line=dict(color="red", width=2, dash="dash")
+    )
+    fig.add_shape(
+        type="line", 
+        x0=0.95, y0=0, 
+        x1=0.95, y1=df_sorted['faturamento_liquido'].max(), 
+        line=dict(color="green", width=2, dash="dash")
+    )
 
     fig.update_layout(
         title="Distribuição da Curva ABC",
@@ -287,12 +303,20 @@ def create_abc_chart(df):
     )
 
     # Adicionar anotações explicativas
-    fig.add_annotation(x=0.4, y=df['faturamento_liquido'].max(), 
-                       text="80% do faturamento - Limite da Categoria A", 
-                       showarrow=False, yshift=10)
-    fig.add_annotation(x=0.975, y=df['faturamento_liquido'].max(), 
-                       text="95% do faturamento - Limite da Categoria B", 
-                       showarrow=False, yshift=10)
+    fig.add_annotation(
+        x=0.4, 
+        y=df_sorted['faturamento_liquido'].max(), 
+        text="80% do faturamento - Limite da Categoria A", 
+        showarrow=False, 
+        yshift=10
+    )
+    fig.add_annotation(
+        x=0.975, 
+        y=df_sorted['faturamento_liquido'].max(), 
+        text="95% do faturamento - Limite da Categoria B", 
+        showarrow=False, 
+        yshift=10
+    )
 
     return fig
 

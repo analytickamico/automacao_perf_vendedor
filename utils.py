@@ -395,6 +395,90 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
     logging.info(f"Executando query para get_stock_data: {query}")
     return query_athena(query)
 
+def get_stock_material_apoio_trade(start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_empresas):
+    channel_filter = f"AND pedidos.canal_venda IN ('{','.join(selected_channels)}')" if selected_channels else ""
+    uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
+    brand_filter = ""
+    empresa_filter = ""
+    empresa_filter_stock = ""
+    brand_filter_stock = ""
+
+        # Filtro de marcas
+    if selected_brands:
+        brands_str = "', '".join(selected_brands)
+        brand_filter = format_filter(selected_brands, "item_pedidos.marca") 
+        brand_filter_stock = format_filter(selected_brands, "e.marca") 
+    
+    # Filtro de empresas
+    if selected_empresas:
+        empresas_str = "', '".join([str(empresa) for empresa in selected_empresas if empresa is not None])
+        empresa_filter = format_filter(selected_empresas, "empresa_pedido.nome_empresa_faturamento")    
+        empresa_filter_stock = format_filter(selected_empresas, "e.empresa")    
+
+
+
+    logging.info(f"Chamada get_stock_data com filtros: channels={selected_channels}, ufs={selected_ufs}, brands={selected_brands}, empresas={selected_empresas}")       
+
+
+    query = f"""
+    WITH vendas AS (
+        SELECT 
+            upper(item_pedidos.sku) cod_produto, 
+            empresa_pedido.cod_empresa_faturamento cod_empresa,
+            pedidos."desc_abrev_cfop" nop,
+            SUM(item_pedidos.qtd) as quantidade_vendida
+        FROM 
+            databeautykami.vw_distribuicao_pedidos pedidos
+        JOIN 
+            databeautykami.vw_distribuicao_item_pedidos item_pedidos ON pedidos.cod_pedido = item_pedidos.cod_pedido
+        JOIN 
+            databeautykami.vw_distribuicao_empresa_pedido empresa_pedido ON pedidos.cod_pedido = empresa_pedido.cod_pedido
+        WHERE 
+            pedidos.operacoes_internas = 'N'
+        AND pedidos.dt_faturamento BETWEEN DATE('{start_date}') AND DATE('{end_date}')
+        AND empresa_pedido.cod_empresa_faturamento not in ('9','21')
+            {channel_filter}
+            {uf_filter}
+            {brand_filter}
+            {empresa_filter}
+        GROUP BY 
+            upper(item_pedidos.sku),
+            empresa_pedido.cod_empresa_faturamento,
+            pedidos."desc_abrev_cfop"
+
+    )       
+
+    SELECT 
+        e.cod_empresa,
+        e.empresa,
+        e.uf_empresa,
+        nop,
+        m.desc_abrev tipo_material,
+        upper(e.cod_produto) cod_produto,
+        max(e.desc_produto) desc_produto,
+        e.cod_marca,
+        e.marca,
+        e.deposito,
+        (e.saldo_estoque) saldo_estoque,
+        e.custo_total,
+        (e.saldo_estoque*e.custo_total) as valor_total_estoque,
+        COALESCE(v.quantidade_vendida, 0) as quantidade_utilizada,
+        DATE_DIFF('day', DATE('{start_date}'), DATE('{end_date}')) as dias_periodo
+    FROM 
+        databeautykami.tbl_varejo_saldo_estoque e
+    INNER JOIN databeautykami.tbl_distribuicao_material_apoio m ON
+        e.cod_produto = m.cod_produto
+    LEFT JOIN
+        vendas v ON upper(e.cod_produto) = v.cod_produto and e.cod_empresa = v.cod_empresa
+    WHERE e.cod_empresa not in ('9','21')
+    {empresa_filter_stock}
+    {brand_filter_stock}
+    -- and upper(e.cod_produto) in (Select upper(cod_produto) from databeautykami.tbl_distribuicao_material_apoio)
+    GROUP BY 1,2,3,4,5,6,8,9,10,11,12,13,14,15
+    """
+    logging.info(f"Executando query para get_stock_material_apoio_trade: {query}")
+    return query_athena(query)
+
 
 def calculate_stock_metrics(df):
     logging.info("Iniciando cálculo de métricas de estoque")
@@ -689,109 +773,151 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
     return df if df is not None else pd.DataFrame()
 
 def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador, selected_teams):
-    # Inicialização de variáveis
-    brand_filter = ""
+    # Inicialização dos filtros
     channel_filter = ""
     uf_filter = ""
+    brand_filter = ""
     team_filter = ""
     colaborador_filter = ""
 
-    # Filtro de marcas
-    if selected_brands:
-        brands_str = "', '".join(selected_brands)
-        brand_filter = f"AND item_pedidos.marca IN ('{brands_str}')"
-    
-    # Filtro de canais de venda
+    # Aplicar filtros
     if selected_channels:
         channels_str = "', '".join(selected_channels)
         channel_filter = f"AND pedidos.canal_venda IN ('{channels_str}')"
     
-    # Filtro de UFs
     if selected_ufs:
         ufs_str = "', '".join(selected_ufs)
         uf_filter = f"AND empresa_pedido.uf_empresa_faturamento IN ('{ufs_str}')"
     
-    # Filtro de equipes
+    if selected_brands:
+        brands_str = "', '".join(selected_brands)
+        brand_filter = f"AND item_pedidos.marca IN ('{brands_str}')"
+
     if selected_teams:
         teams_str = "', '".join(selected_teams)
-        team_filter = f"AND empresa_pedido.equipes IN ('{teams_str}')"
-
-    # Filtro de colaborador
+        team_filter = format_filter(selected_teams, "empresa_pedido.equipes")
+    
     if cod_colaborador:
         colaborador_filter = f"AND empresa_pedido.cod_colaborador_atual = '{cod_colaborador}'"
     elif selected_nome_colaborador:
         nome_str = "', '".join(selected_nome_colaborador)
-        colaborador_filter = f"AND ( empresa_pedido.nome_colaborador_atual IN ('{nome_str}') OR empresa_pedido.nome_colaborador_pedido IN ('{nome_str}') )"
+        colaborador_filter = f"AND empresa_pedido.nome_colaborador_atual IN ('{nome_str}')"
 
     query = f"""
-    WITH produto_sales AS (
-      SELECT
-        item_pedidos.sku,
-        MAX(item_pedidos.desc_produto) as nome_produto,
-        item_pedidos.marca,
-        SUM(item_pedidos.preco_desconto_rateado) AS faturamento_liquido,
-        SUM(item_pedidos.qtd) AS quantidade_vendida
-      FROM
-        "databeautykami"."vw_distribuicao_pedidos" pedidos
-      LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
-        ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
-      LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
-        ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
-      WHERE
-        pedidos."desc_abrev_cfop" IN (
+    WITH vendas AS (
+        SELECT
+            upper(item_pedidos.sku) as sku,
+            max(item_pedidos.desc_produto) as nome_produto,
+            item_pedidos.marca,
+            empresa_pedido.uf_empresa_faturamento as uf_empresa,
+            empresa_pedido.nome_empresa_faturamento as empresa,
+            SUM(item_pedidos.preco_desconto_rateado) as faturamento_liquido,
+            SUM(item_pedidos.qtd) as quantidade_vendida
+        FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
+        LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+            ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+        LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+            ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+        WHERE pedidos."desc_abrev_cfop" IN (
             'VENDA', 'VENDA DE MERC.SUJEITA ST', 'VENDA DE MERCADORIA P/ NÃO CONTRIBUINTE',
             'VENDA DO CONSIGNADO', 'VENDA MERC. REC. TERCEIROS DESTINADA A ZONA FRANCA DE MANAUS',
             'VENDA MERC.ADQ. BRASIL FORA ESTADO', 'VENDA MERCADORIA DENTRO DO ESTADO',
-            'Venda de mercadoria sujeita ao regime de substituição tributária',
             'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
         )
-        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
         AND pedidos.operacoes_internas = 'N'
+        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
         {channel_filter}
         {uf_filter}
         {brand_filter}
-        {team_filter}
         {colaborador_filter}
-      GROUP BY 1,3
+        {team_filter}
+        GROUP BY 1,3,4,5
     ),
-    produto_abc AS (
-      SELECT
-        *,
-        SUM(faturamento_liquido) OVER () AS total_faturamento,
-        SUM(faturamento_liquido) OVER (ORDER BY faturamento_liquido DESC) / SUM(faturamento_liquido) OVER () AS faturamento_acumulado,
-        CASE
-          WHEN SUM(faturamento_liquido) OVER (ORDER BY faturamento_liquido DESC) / SUM(faturamento_liquido) OVER () <= 0.8 THEN 'A'
-          WHEN SUM(faturamento_liquido) OVER (ORDER BY faturamento_liquido DESC) / SUM(faturamento_liquido) OVER () <= 0.95 THEN 'B'
-          ELSE 'C'
-        END AS curva
-      FROM produto_sales
+    bonificacao AS (
+        SELECT
+            upper(item_pedidos.sku) as sku,
+            SUM(item_pedidos.qtd) as quantidade_bonificada
+        FROM "databeautykami"."vw_distribuicao_pedidos" pedidos
+        LEFT JOIN "databeautykami"."vw_distribuicao_item_pedidos" AS item_pedidos 
+            ON pedidos."cod_pedido" = item_pedidos."cod_pedido"
+        LEFT JOIN "databeautykami"."vw_distribuicao_empresa_pedido" AS empresa_pedido 
+            ON pedidos."cod_pedido" = empresa_pedido."cod_pedido"
+        WHERE upper(pedidos."desc_abrev_cfop") in (
+            'BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO',
+            'REMESSA EM BONIFICAÇÃO','BRINDE OU DOAÇÃO','BRINDE','CAMPANHA','PROMOCAO'
+        )
+        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+        {channel_filter}
+        {uf_filter}
+        {brand_filter}
+        {colaborador_filter}
+        {team_filter}
+        GROUP BY 1
+    ),
+    estoque AS (
+        SELECT
+            upper(e.cod_produto) as sku,
+            max(e.desc_produto) as nome_produto,
+            e.marca,
+            e.empresa,
+            e.uf_empresa,
+            SUM(e.saldo_estoque) as saldo_estoque,
+            AVG(e.custo_total) as custo_total,
+            SUM(e.saldo_estoque * e.custo_total) as valor_estoque
+        FROM "databeautykami"."tbl_varejo_saldo_estoque" e
+        WHERE e.cod_empresa not in ('9','21')
+        GROUP BY 1,3,4,5
+    ),  
+    faturamento_total AS (
+        SELECT 
+            sku,
+            uf_empresa as uf,
+            SUM(faturamento_liquido) as faturamento_liquido_sku,
+            SUM(SUM(faturamento_liquido)) OVER (PARTITION BY uf_empresa ORDER BY SUM(faturamento_liquido) DESC) as fat_acumulado,
+            SUM(SUM(faturamento_liquido)) OVER (PARTITION BY uf_empresa) as total_faturamento
+        FROM vendas
+        GROUP BY sku, uf_empresa
     )
-    SELECT *
-    FROM produto_abc
-    ORDER BY faturamento_liquido DESC
+    ,
+    abc_classification AS (
+        SELECT vendas.*,
+            faturamento_total.fat_acumulado,
+            faturamento_total.total_faturamento,
+            (fat_acumulado / total_faturamento) as proporcao_faturamento,
+            CASE
+                WHEN (fat_acumulado / total_faturamento) <= 0.8 THEN 'A'
+                WHEN (fat_acumulado / total_faturamento) <= 0.95 THEN 'B'
+                ELSE 'C'
+            END as curva
+        FROM vendas
+        JOIN faturamento_total 
+            ON vendas.sku = faturamento_total.sku
+            AND vendas.uf_empresa = faturamento_total.uf
+    )
+    SELECT 
+        COALESCE(a.sku, e.sku) as sku,
+        COALESCE(a.nome_produto, e.nome_produto) as nome_produto,
+        COALESCE(a.marca, e.marca) as marca,
+        COALESCE(a.uf_empresa, e.uf_empresa) as uf_empresa,
+        COALESCE(a.empresa, e.empresa) as empresa,
+        COALESCE(a.faturamento_liquido, 0) as faturamento_liquido,
+        COALESCE(a.quantidade_vendida, 0) as quantidade_vendida,
+        COALESCE(b.quantidade_bonificada, 0) as quantidade_bonificada,
+        COALESCE(a.curva, 'C') as curva,
+        COALESCE(e.saldo_estoque, 0) as saldo_estoque,
+        COALESCE(e.valor_estoque, 0) as valor_estoque
+    FROM abc_classification a
+    FULL OUTER JOIN estoque e 
+        ON a.sku = e.sku 
+        AND a.uf_empresa = e.uf_empresa 
+        AND a.empresa = e.empresa
+    LEFT JOIN bonificacao b ON COALESCE(a.sku, e.sku) = b.sku
+    WHERE e.saldo_estoque > 0 OR a.sku IS NOT NULL
+    ORDER BY faturamento_liquido DESC, valor_estoque DESC;   
     """
-    
-    logging.info(f"Query executada para Curva ABC: {query}")
-    logging.info(f"Parâmetros de entrada:")
-    logging.info(f"cod_colaborador: {cod_colaborador}")
-    logging.info(f"start_date: {start_date}")
-    logging.info(f"end_date: {end_date}")
-    logging.info(f"selected_channels: {selected_channels}")
-    logging.info(f"selected_ufs: {selected_ufs}")
-    logging.info(f"selected_brands: {selected_brands}")
-    logging.info(f"selected_nome_colaborador: {selected_nome_colaborador}")
-    logging.info(f"selected_teams: {selected_teams}")
 
-    df = query_athena(query)
-    if df is not None:
-        logging.info(f"DataFrame resultante: shape={df.shape}, colunas={df.columns.tolist()}")
-        if not df.empty:
-            logging.info(f"Primeiras linhas:\n{df.head()}")
-        else:
-            logging.warning("DataFrame está vazio após a query")
-    else:
-        logging.warning("Query retornou None")
-    return df if df is not None else pd.DataFrame()
+    logging.info(f"Executando query ABC Regional: {query}")
+    return query_athena(query)
     
 def get_monthly_revenue(cod_colaborador, start_date, end_date, selected_channels, selected_ufs, selected_brands, selected_nome_colaborador,selected_teams):
     # Inicialização de variáveis
