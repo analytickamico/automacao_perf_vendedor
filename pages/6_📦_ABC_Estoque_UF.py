@@ -36,6 +36,32 @@ def initialize_filters():
         }
     if 'static_data' not in st.session_state:
         st.session_state.static_data = get_static_data()
+        
+    # Inicializar variáveis de dados
+    if 'abc_data' not in st.session_state:
+        st.session_state.abc_data = pd.DataFrame()
+    if 'data_with_sales' not in st.session_state:
+        st.session_state.data_with_sales = pd.DataFrame()
+    if 'data_without_sales' not in st.session_state:
+        st.session_state.data_without_sales = pd.DataFrame()
+
+    # Inicializar variáveis de seleção
+    if 'selected_channels' not in st.session_state:
+        st.session_state.selected_channels = []
+    if 'selected_ufs' not in st.session_state:
+        st.session_state.selected_ufs = []
+    if 'selected_brands' not in st.session_state:
+        st.session_state.selected_brands = []
+    if 'selected_teams' not in st.session_state:
+        st.session_state.selected_teams = []
+    if 'selected_colaboradores' not in st.session_state:
+        st.session_state.selected_colaboradores = []
+
+    # Inicializar datas
+    if 'end_date' not in st.session_state:
+        st.session_state.end_date = datetime.now() - timedelta(days=1)
+    if 'start_date' not in st.session_state:
+        st.session_state.start_date = st.session_state.end_date - timedelta(days=90)
 
 def load_filters():
     """Load and display filters in sidebar"""
@@ -175,13 +201,29 @@ def generate_excel_report(data_with_sales=None, data_without_sales=None):
         })
         number_format = workbook.add_format({'num_format': '#,##0'})
         currency_format = workbook.add_format({'num_format': 'R$ #,##0.00'})
+        decimal_format = workbook.add_format({'num_format': '#,##0.00'})
         
         # Criar Resumo ABC se houver dados de produtos com venda
         if data_with_sales is not None:
+            # Calculando o giro de estoque por produto
+            days_period = (st.session_state['end_date'] - st.session_state['start_date']).days
+            data_with_sales = data_with_sales.copy()
+            data_with_sales['venda_media_diaria'] = (
+                data_with_sales['quantidade_vendida'] + 
+                data_with_sales['quantidade_bonificada']
+            ) / days_period
+            
+            data_with_sales['giro_estoque'] = np.where(
+                data_with_sales['venda_media_diaria'] == 0,
+                0,
+                data_with_sales['saldo_estoque'] / data_with_sales['venda_media_diaria']
+            )
+            
             summary_df = data_with_sales.groupby(['curva', 'marca', 'uf_empresa']).agg({
                 'faturamento_liquido': 'sum',
                 'saldo_estoque': 'sum',
-                'valor_estoque': 'sum'
+                'valor_estoque': 'sum',
+                'giro_estoque': 'mean'  # Média do giro de estoque por grupo
             }).reset_index()
             
             summary_df.to_excel(writer, sheet_name='Resumo ABC', index=False)
@@ -194,6 +236,8 @@ def generate_excel_report(data_with_sales=None, data_without_sales=None):
                     worksheet.set_column(idx, idx, 15, currency_format)
                 elif col in ['saldo_estoque']:
                     worksheet.set_column(idx, idx, 12, number_format)
+                elif col == 'giro_estoque':
+                    worksheet.set_column(idx, idx, 12, decimal_format)
         
         # Produtos com venda
         if data_with_sales is not None:
@@ -201,7 +245,7 @@ def generate_excel_report(data_with_sales=None, data_without_sales=None):
             export_cols = [
                 'sku', 'nome_produto', 'marca', 'uf_empresa', 'empresa', 'curva',
                 'faturamento_liquido', 'quantidade_vendida', 'quantidade_bonificada',
-                'saldo_estoque', 'valor_estoque'
+                'saldo_estoque', 'valor_estoque', 'giro_estoque'
             ]
             
             data_with_sales[export_cols].to_excel(
@@ -217,26 +261,25 @@ def generate_excel_report(data_with_sales=None, data_without_sales=None):
                     worksheet.set_column(idx, idx, 15, currency_format)
                 elif 'quantidade' in col.lower() or 'saldo' in col.lower():
                     worksheet.set_column(idx, idx, 12, number_format)
+                elif col == 'giro_estoque':
+                    worksheet.set_column(idx, idx, 12, decimal_format)
                 else:
                     worksheet.set_column(idx, idx, 15)
         
         # Produtos sem venda
         if data_without_sales is not None:
             sheet_name = 'Produtos sem Venda'
-            # Nomes ajustados para correspondência correta
             export_cols_no_sales = [
                 'sku', 'nome_produto', 'marca', 'uf_empresa', 'empresa',
                 'saldo_estoque', 'valor_total_estoque'
             ]
 
-            # Renomear colunas no DataFrame para corresponder à lista export_cols_no_sales
             data_without_sales = data_without_sales.rename(columns={
                 'cod_produto': 'sku',
                 'desc_produto': 'nome_produto',
                 'valor_estoque': 'valor_total_estoque'
             })
             
-            # Exportar os dados ajustados para a aba no Excel
             data_without_sales[export_cols_no_sales].to_excel(
                 writer, 
                 sheet_name=sheet_name, 
@@ -252,7 +295,6 @@ def generate_excel_report(data_with_sales=None, data_without_sales=None):
                     worksheet.set_column(idx, idx, 12, number_format)
                 else:
                     worksheet.set_column(idx, idx, 15)
-
     
     return output.getvalue()
 
@@ -261,6 +303,14 @@ def create_abc_regional_analysis():
     st.title("Análise ABC Regional com Estoque")
     
     try:       
+        # Garantir que os DataFrames existem no session_state
+        if 'abc_data' not in st.session_state:
+            st.session_state.abc_data = pd.DataFrame()
+        if 'data_with_sales' not in st.session_state:
+            st.session_state.data_with_sales = pd.DataFrame()
+        if 'data_without_sales' not in st.session_state:
+            st.session_state.data_without_sales = pd.DataFrame()
+            
         # Definir colunas de display
         display_cols = [
                 'sku', 'nome_produto', 'marca', 'uf_empresa', 'empresa', 'curva',
@@ -313,7 +363,7 @@ def create_abc_regional_analysis():
 
 
         # Métricas principais
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
             total_faturamento = st.session_state['abc_data']['faturamento_liquido'].sum()
             st.markdown(create_metric_html("Faturamento Total", total_faturamento, is_currency=True), unsafe_allow_html=True)
@@ -323,7 +373,19 @@ def create_abc_regional_analysis():
         with col3:
             total_skus = len(st.session_state['abc_data']['sku'].unique())
             st.markdown(create_metric_html("Total de SKUs", f"{total_skus:,.0f}".replace(',', '.'), is_currency=False), unsafe_allow_html=True)
-        with col4:
+
+        # Métricas de SKUs por curva
+        st.subheader("Distribuição de SKUs por Curva")
+        
+        # Calcular quantidade e percentual de SKUs por curva
+        skus_por_curva = st.session_state['abc_data'].groupby('curva')['sku'].nunique().reset_index()
+        skus_por_curva['percentual'] = (skus_por_curva['sku'] / skus_por_curva['sku'].sum() * 100)
+        
+        # Exibir métricas de SKUs por curva
+        cols_curva = st.columns(4)
+        
+        # Giro de estoque no primeiro slot
+        with cols_curva[0]:
             # Calculando a venda média diária
             venda_media_diaria = (
                 st.session_state['abc_data']['quantidade_vendida'].sum()
@@ -334,16 +396,31 @@ def create_abc_regional_analysis():
             quantidade_estoque = st.session_state['abc_data']['saldo_estoque'].sum()
 
             # Calculando o giro de estoque
-            if venda_media_diaria == 0 or quantidade_estoque > 0:
+            if venda_media_diaria == 0:
                 giro_estoque = 0
             else:
                 giro_estoque = quantidade_estoque / venda_media_diaria
 
-            # Exibindo a métrica
             st.markdown(
                 create_metric_html("Giro de Estoque", f"{giro_estoque:.2f}x dias", is_currency=False),
                 unsafe_allow_html=True
             )
+        
+        # Métricas por curva
+        for idx, curva in enumerate(['A', 'B', 'C']):
+            with cols_curva[idx + 1]:
+                curva_data = skus_por_curva[skus_por_curva['curva'] == curva]
+                if not curva_data.empty:
+                    qtd_skus = int(curva_data['sku'].iloc[0])
+                    percentual = curva_data['percentual'].iloc[0]
+                    st.markdown(
+                        create_metric_html(
+                            f"Curva {curva}",
+                            f"{qtd_skus:,} SKUs ({percentual:.1f}%)".replace(',', '.'),
+                            is_currency=False
+                        ),
+                        unsafe_allow_html=True
+                    )
 
         
         # Criar as tabs
@@ -427,6 +504,7 @@ def create_abc_regional_analysis():
             st.subheader("Detalhamento - Produtos com Venda no Período")
             filtered_data = st.session_state['data_with_sales'].copy()
             
+            # 1. Filtros
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 search_term = st.text_input("Buscar por SKU ou Nome do Produto", key="search_with_sales")
@@ -439,9 +517,8 @@ def create_abc_regional_analysis():
             with col4:
                 ufs_disponiveis = ['Todas'] + sorted(filtered_data['uf_empresa'].unique().tolist())
                 selected_uf = st.selectbox("Filtrar por UF", options=ufs_disponiveis, key="uf_with_sales")
-            
 
-            # Aplicar filtros
+            # 2. Aplicar filtros
             if search_term:
                 filtered_data = filtered_data[
                     filtered_data['sku'].str.contains(search_term, case=False, na=False) |
@@ -454,7 +531,46 @@ def create_abc_regional_analysis():
             if selected_marca != 'Todas':
                 filtered_data = filtered_data[filtered_data['marca'] == selected_marca]
 
-            # Exibir tabela
+            # 3. Resumo por curva
+            st.subheader("Totais por Curva ABC")
+            resumo_curva = filtered_data.groupby('curva').agg({
+                'sku': 'nunique',
+                'faturamento_liquido': 'sum',
+                'valor_estoque': 'sum',
+                'quantidade_vendida': 'sum',
+                'saldo_estoque': 'sum'
+            }).reset_index()
+            
+            # Calcular percentuais
+            total_skus_vendidos = resumo_curva['sku'].sum()
+            total_faturamento = resumo_curva['faturamento_liquido'].sum()
+            total_estoque = resumo_curva['valor_estoque'].sum()
+            
+            resumo_curva['perc_skus'] = (resumo_curva['sku'] / total_skus_vendidos * 100)
+            resumo_curva['perc_faturamento'] = (resumo_curva['faturamento_liquido'] / total_faturamento * 100)
+            resumo_curva['perc_estoque'] = (resumo_curva['valor_estoque'] / total_estoque * 100)
+            
+            # Formatar o DataFrame para exibição
+            resumo_curva_display = pd.DataFrame({
+                'Curva': resumo_curva['curva'],
+                'Qtde SKUs': resumo_curva['sku'].map('{:,.0f}'.format).str.replace(',', '.'),
+                '% SKUs': resumo_curva['perc_skus'].map('{:.1f}%'.format),
+                'Faturamento': resumo_curva['faturamento_liquido'].map('R$ {:,.2f}'.format).str.replace(',', '_').str.replace('.', ',').str.replace('_', '.'),
+                '% Faturamento': resumo_curva['perc_faturamento'].map('{:.1f}%'.format),
+                'Valor em Estoque': resumo_curva['valor_estoque'].map('R$ {:,.2f}'.format).str.replace(',', '_').str.replace('.', ',').str.replace('_', '.'),
+                '% Estoque': resumo_curva['perc_estoque'].map('{:.1f}%'.format),
+                'Qtde Vendida': resumo_curva['quantidade_vendida'].map('{:,.0f}'.format).str.replace(',', '.'),
+                'Saldo Estoque': resumo_curva['saldo_estoque'].map('{:,.0f}'.format).str.replace(',', '.')
+            })
+            
+            st.dataframe(
+                resumo_curva_display,
+                hide_index=True,
+                use_container_width=True
+            )
+
+            # 4. Tabela detalhada
+            st.subheader("Detalhamento por Produto")
             st.dataframe(
                 filtered_data[display_cols].style.format({
                     'faturamento_liquido': 'R$ {:,.2f}',
@@ -467,6 +583,7 @@ def create_abc_regional_analysis():
                 use_container_width=True
             )
 
+            # 5. Botão de exportação
             if st.button("Exportar para Excel", key="export_with_sales"):
                 excel_data = generate_excel_report(data_with_sales=filtered_data)
                 st.download_button(

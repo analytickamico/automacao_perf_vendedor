@@ -190,14 +190,28 @@ def create_dashboard():
         if not df.empty:
             # Resumo geral da Curva ABC
             st.subheader("Resumo da Curva ABC")
+            
+            # Calcular SKUs únicos por curva
+            skus_por_curva = df.groupby('curva')['sku'].nunique()
+            total_skus = skus_por_curva.sum()
+            
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Produtos A", f"{len(df[df['curva'] == 'A'])} ({len(df[df['curva'] == 'A']) / len(df):.1%})")
+                st.metric(
+                    "Produtos A", 
+                    f"{skus_por_curva['A']} ({skus_por_curva['A'] / total_skus:.1%})"
+                )
             with col2:
-                st.metric("Produtos B", f"{len(df[df['curva'] == 'B'])} ({len(df[df['curva'] == 'B']) / len(df):.1%})")
+                st.metric(
+                    "Produtos B", 
+                    f"{skus_por_curva['B']} ({skus_por_curva['B'] / total_skus:.1%})"
+                )
             with col3:
-                st.metric("Produtos C", f"{len(df[df['curva'] == 'C'])} ({len(df[df['curva'] == 'C']) / len(df):.1%})")
-
+                st.metric(
+                    "Produtos C", 
+                    f"{skus_por_curva['C']} ({skus_por_curva['C'] / total_skus:.1%})"
+                )
+                
             # Gráfico de distribuição da Curva ABC
             st.subheader("Distribuição da Curva ABC")
             fig = create_abc_chart(df)
