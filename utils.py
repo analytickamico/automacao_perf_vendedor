@@ -477,7 +477,11 @@ def get_stock_material_apoio_trade(start_date, end_date, selected_channels, sele
     GROUP BY 1,2,3,4,5,6,8,9,10,11,12,13,14,15
     """
     logging.info(f"Executando query para get_stock_material_apoio_trade: {query}")
-    return query_athena(query)
+    data = query_athena(query)
+    
+    logging.info(f"Tipos de dados das colunas: \n{data.dtypes}")
+    
+    return data
 
 
 def calculate_stock_metrics(df):
@@ -2340,7 +2344,7 @@ def get_client_status(start_date, end_date, cod_colaborador, selected_channels, 
     query = """
     WITH Meses AS (
             SELECT 
-                DATE_TRUNC('month', date_add('month', -seq, DATE('2024-12-01'))) AS mes
+                DATE_TRUNC('month', date_add('month', -seq, DATE('2025-12-01'))) AS mes
             FROM 
                 UNNEST(SEQUENCE(0, 15)) AS t(seq)
     ),

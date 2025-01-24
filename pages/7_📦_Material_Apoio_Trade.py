@@ -6,6 +6,8 @@ from session_state_manager import init_session_state, load_page_specific_state
 import logging
 from datetime import datetime, timedelta
 import time
+from io import BytesIO
+from styles import apply_theme
 
 # Configurar logging
 logging.basicConfig(
@@ -15,6 +17,7 @@ logging.basicConfig(
 
 # Page config
 st.set_page_config(page_title="Material de Trade e Apoio", page_icon="📦", layout="wide")
+#apply_theme()
 
 def initialize_filters():
     """Initialize session state filters"""
@@ -141,10 +144,6 @@ def main():
         
         st.title("Análise de Materiais de Trade e Apoio 📦")
 
-        # Botão de atualização
-        if st.button("Atualizar Dados"):
-            st.session_state.data_needs_update = True
-            
         try:
             if st.session_state.get('data_needs_update', True):
                 with st.spinner("Carregando dados..."):
@@ -161,6 +160,13 @@ def main():
                         st.warning("Não há dados disponíveis para os filtros selecionados.")
                         return
 
+                    data = data.fillna({
+                        'tipo_material': 'Não Classificado',
+                        'nop': 'Sem NOP'
+                    })
+                    data['tipo_material'] = data['tipo_material'].astype(str)
+                    data['nop'] = data['nop'].astype(str)
+
                     st.session_state['trade_materials_data'] = data
                     st.session_state.data_needs_update = False
 
@@ -173,12 +179,10 @@ def main():
             # Métricas principais
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                total_materials = data['saldo_estoque'].sum()
-                st.markdown(create_metric_html(
-                    "Total de Materiais", 
-                    f"{total_materials:,.0f}".replace(',', '.'),
-                    is_currency=False
-                ), unsafe_allow_html=True)
+                total_materials = data['saldo_estoque'].sum()  # Definir antes de usar
+                st.markdown('<div data-testid="metric-container">', unsafe_allow_html=True)
+                st.metric("Total de Materiais", f"{total_materials:,.0f}".replace(',', '.'))
+                st.markdown('</div>', unsafe_allow_html=True)
                 
             with col2:
                 total_value = data['valor_total_estoque'].sum()
@@ -212,17 +216,17 @@ def main():
             tab1, tab2 = st.tabs(["Visão Geral", "Detalhamento"])
 
             # Tab 1 - Visão Geral
+            # Na Tab 1
             with tab1:
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    # Ajuste do filtro tipo_material na tab1
-                    tipos_material = ['Todos'] + sorted(data['tipo_material'].dropna().unique().tolist())
+                    tipos_material = data['tipo_material'].unique()
+                    tipos_material = ['Todos'] + sorted([x for x in tipos_material if x is not None])
+                    
                     selected_tipo_overview = st.selectbox(
                         "Filtrar por Tipo de Material",
-                        options=tipos_material,
-                        key="tipo_material_overview",
-                        index=0  # Garante que 'Todos' seja o valor padrão
+                        options=tipos_material
                     )
                     
                     # Aplicar filtro
@@ -231,21 +235,25 @@ def main():
                         filtered_data = filtered_data[filtered_data['tipo_material'] == selected_tipo_overview]
 
                     # Gráfico de utilização por marca
-                    brand_summary = filtered_data.groupby(['marca', 'tipo_material']).agg({
+                    brand_summary = filtered_data.groupby('marca').agg({
                         'quantidade_utilizada': 'sum',
                         'saldo_estoque': 'sum'
                     }).reset_index()
                     
-                    fig_usage = px.bar(
+                    brand_summary_melted = pd.melt(
                         brand_summary,
+                        id_vars=['marca'],
+                        value_vars=['quantidade_utilizada', 'saldo_estoque'],
+                        var_name='Tipo',
+                        value_name='Quantidade'
+                    )
+                    
+                    fig_usage = px.bar(
+                        brand_summary_melted,
                         x='marca',
-                        y=['quantidade_utilizada', 'saldo_estoque'],
-                        color='tipo_material',
-                        title='Utilização por Marca e Tipo de Material',
-                        labels={
-                            'value': 'Quantidade',
-                            'variable': 'Tipo'
-                        },
+                        y='Quantidade',
+                        color='Tipo',
+                        title='Utilização por Marca',
                         barmode='group'
                     )
                     st.plotly_chart(fig_usage, use_container_width=True)
@@ -273,72 +281,47 @@ def main():
                 st.session_state.current_tab = "Visão Geral"
 
             # Tab 2 - Detalhamento
+            # Na tab2:
             with tab2:
                 st.subheader("Detalhamento dos Materiais")
-                
+                st.markdown("""
+                    <style>
+                    .custom-dataframe {
+                        background-color: #2D2D2D !important;
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
+
+                # Antes da tabela detalhada
+                st.markdown('<div class="custom-dataframe">', unsafe_allow_html=True)
                 # Filtros locais
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     search_term = st.text_input("Buscar por Código ou Descrição", key="search_detail")
                 with col2:
-                    marcas_disponiveis = ['Todas'] + sorted(data['marca'].unique().tolist())
-                    selected_marca = st.selectbox(
-                        "Filtrar por Marca", 
-                        options=marcas_disponiveis,
-                        key="marca_detail"
-                    )
+                    marcas_disponiveis = ['Todas'] + sorted(data['marca'].dropna().unique().tolist())
+                    selected_marca = st.selectbox("Filtrar por Marca", options=marcas_disponiveis, key="marca_detail")
                 with col3:
-                    ufs_disponiveis = ['Todas'] + sorted(data['uf_empresa'].unique().tolist())
-                    selected_uf = st.selectbox(
-                        "Filtrar por UF", 
-                        options=ufs_disponiveis,
-                        key="uf_detail"
-                    )
+                    ufs_disponiveis = ['Todas'] + sorted(data['uf_empresa'].dropna().unique().tolist())
+                    selected_uf = st.selectbox("Filtrar por UF", options=ufs_disponiveis, key="uf_detail")
                 with col4:
-                    tipos_material = ['Todos'] + sorted(data['tipo_material'].unique().tolist())
-                    selected_tipo = st.selectbox(
-                        "Filtrar por Tipo de Material",
-                        options=tipos_material,
-                        key="tipo_material_detail"
-                    )
+                    tipos_material = ['Todos'] + sorted(data['tipo_material'].dropna().unique().tolist())
+                    selected_tipo = st.selectbox("Filtrar por Tipo de Material", options=tipos_material, key="tipo_material_detail")
 
-                # Aplicar filtros (apenas uma vez)
+                # Aplicar filtros com tratamento de nulos
                 filtered_data = data.copy()
                 if search_term:
                     filtered_data = filtered_data[
-                        filtered_data['cod_produto'].str.contains(search_term, case=False, na=False) |
-                        filtered_data['desc_produto'].str.contains(search_term, case=False, na=False)
+                        filtered_data['cod_produto'].fillna('').str.contains(search_term, case=False, na=False) |
+                        filtered_data['desc_produto'].fillna('').str.contains(search_term, case=False, na=False)
                     ]
                 if selected_marca != 'Todas':
-                    filtered_data = filtered_data[filtered_data['marca'] == selected_marca]
+                    filtered_data = filtered_data[filtered_data['marca'].fillna('') == selected_marca]
                 if selected_uf != 'Todas':
-                    filtered_data = filtered_data[filtered_data['uf_empresa'] == selected_uf]
+                    filtered_data = filtered_data[filtered_data['uf_empresa'].fillna('') == selected_uf]
                 if selected_tipo != 'Todos':
-                    filtered_data = filtered_data[filtered_data['tipo_material'] == selected_tipo]
+                    filtered_data = filtered_data[filtered_data['tipo_material'].fillna('') == selected_tipo]
 
-                # Métricas em um layout separado após os filtros
-                st.markdown("---")  # Linha divisória
-                metric_col1, metric_col2, metric_col3 = st.columns(3)
-                with metric_col1:
-                    st.metric(
-                        "Total de SKUs", 
-                        f"{len(filtered_data['cod_produto'].unique()):,}".replace(',', '.')
-                    )
-                with metric_col2:
-                    valor_total = filtered_data['valor_total_estoque'].sum()
-                    st.metric(
-                        "Valor Total em Estoque", 
-                        f"R$ {valor_total:,.2f}".replace(',', '.')
-                    )
-                with metric_col3:
-                    total_utilizado = filtered_data['quantidade_utilizada'].sum()
-                    st.metric(
-                        "Total Utilizado",
-                        f"{total_utilizado:,.0f}".replace(',', '.')
-                    )
-
-                # Exibir tabela detalhada
-                st.markdown("---")  # Linha divisória
                 st.dataframe(
                     filtered_data[[
                         'cod_produto', 'desc_produto', 'marca', 'uf_empresa', 'empresa',
@@ -352,6 +335,7 @@ def main():
                     hide_index=True,
                     use_container_width=True
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
 
                 # Botão de exportação Excel com melhor posicionamento
                 col1, col2, col3 = st.columns([1, 1, 2])
@@ -370,6 +354,10 @@ def main():
                     st.session_state.current_tab = "Visão Geral"
                 if tab2:
                     st.session_state.current_tab = "Detalhamento"
+
+            # Botão de atualização
+            if st.button("Atualizar Dados"):
+                st.session_state.data_needs_update = True
 
         except Exception as e:
             st.error(f"Erro ao processar dados: {str(e)}")
