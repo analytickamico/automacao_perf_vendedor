@@ -2014,7 +2014,7 @@ def get_recency_clients(cod_colaborador, start_date, end_date, recencias, select
             c.qtd_titulos,
             c.vlr_inadimplente
         FROM
-            "databeautykami"._V2 a
+            "databeautykami".vw_analise_perfil_cliente_V2 a
         LEFT JOIN "databeautykami".vw_distribuicao_cliente_vendedor b 
             ON a.Cod_Cliente = b.cod_cliente
         LEFT JOIN "databeautykami".tbl_distribuicao_clientes_inadimplentes c 
