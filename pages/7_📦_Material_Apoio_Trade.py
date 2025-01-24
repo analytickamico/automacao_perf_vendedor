@@ -218,23 +218,21 @@ def main():
             # Tab 1 - Visão Geral
             # Na Tab 1
             with tab1:
-                col1, col2 = st.columns(2)
+                container = st.container()
+                col1, col2 = container.columns(2)
                 
                 with col1:
                     tipos_material = data['tipo_material'].unique()
-                    tipos_material = ['Todos'] + sorted([x for x in tipos_material if x is not None])
-                    
                     selected_tipo_overview = st.selectbox(
                         "Filtrar por Tipo de Material",
-                        options=tipos_material
+                        options=['Todos'] + sorted([x for x in tipos_material if x is not None]),
+                        key="tipo_material_overview"
                     )
                     
-                    # Aplicar filtro
                     filtered_data = data.copy()
                     if selected_tipo_overview != 'Todos':
                         filtered_data = filtered_data[filtered_data['tipo_material'] == selected_tipo_overview]
 
-                    # Gráfico de utilização por marca
                     brand_summary = filtered_data.groupby('marca').agg({
                         'quantidade_utilizada': 'sum',
                         'saldo_estoque': 'sum'
@@ -254,12 +252,21 @@ def main():
                         y='Quantidade',
                         color='Tipo',
                         title='Utilização por Marca',
-                        barmode='group'
+                        color_discrete_map={'quantidade_utilizada': '#1f77b4', 'saldo_estoque': '#ff7f0e'},
+                        template='plotly_white',
+                        height=500
                     )
+                    
+                    fig_usage.update_layout(
+                        legend_title_text='',
+                        xaxis_title="",
+                        yaxis_title="Quantidade",
+                        bargap=0.2
+                    )
+                    
                     st.plotly_chart(fig_usage, use_container_width=True)
-                
+
                 with col2:
-                    # Gráfico de valor em estoque por UF
                     uf_summary = filtered_data.groupby(['uf_empresa', 'tipo_material']).agg({
                         'valor_total_estoque': 'sum'
                     }).reset_index()
@@ -269,12 +276,20 @@ def main():
                         x='uf_empresa',
                         y='valor_total_estoque',
                         color='tipo_material',
-                        title='Valor em Estoque por UF e Tipo de Material',
-                        labels={
-                            'valor_total_estoque': 'Valor em Estoque',
-                            'uf_empresa': 'UF'
-                        }
+                        title='Valor em Estoque por UF',
+                        template='plotly_white',
+                        height=500
                     )
+                    
+                    fig_stock.update_layout(
+                        xaxis_title="UF",
+                        yaxis_title="Valor em Estoque (R$)",
+                        legend_title_text='Tipo Material',
+                        bargap=0.2
+                    )
+                    
+                    fig_stock.update_yaxes(tickformat=",.2f", tickprefix="R$ ")
+                    
                     st.plotly_chart(fig_stock, use_container_width=True)
 
                 # Atualizar o estado da tab
@@ -284,16 +299,28 @@ def main():
             # Na tab2:
             with tab2:
                 st.subheader("Detalhamento dos Materiais")
+                
+                # Métricas em cards
                 st.markdown("""
-                    <style>
-                    .custom-dataframe {
-                        background-color: #2D2D2D !important;
-                    }
-                    </style>
-                """, unsafe_allow_html=True)
-
-                # Antes da tabela detalhada
-                st.markdown('<div class="custom-dataframe">', unsafe_allow_html=True)
+                <div style="display: flex; justify-content: space-between; gap: 20px; margin: 20px 0;">
+                    <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
+                        <div style="font-size: 16px; color: #666;">Total SKUs</div>
+                        <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">{}</div>
+                    </div>
+                    <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
+                        <div style="font-size: 16px; color: #666;">Valor Total</div>
+                        <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">R$ {:,.2f}</div>
+                    </div>
+                    <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
+                        <div style="font-size: 16px; color: #666;">Quantidade Utilizada</div>
+                        <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">{:,.0f}</div>
+                    </div>
+                </div>
+                """.format(
+                    len(filtered_data['cod_produto'].unique()), 
+                    filtered_data['valor_total_estoque'].sum(),
+                    filtered_data['quantidade_utilizada'].sum()
+                ), unsafe_allow_html=True)
                 # Filtros locais
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
@@ -335,7 +362,13 @@ def main():
                     hide_index=True,
                     use_container_width=True
                 )
-                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("""
+                    <style>
+                    .custom-dataframe {
+                        background-color: #2D2D2D !important;
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
 
                 # Botão de exportação Excel com melhor posicionamento
                 col1, col2, col3 = st.columns([1, 1, 2])
