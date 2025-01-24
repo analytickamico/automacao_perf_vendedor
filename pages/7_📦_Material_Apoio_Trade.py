@@ -64,18 +64,26 @@ def load_filters():
     
     # Brand filter with "Select All" option
     all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
-    
+
     with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
+        available_brands = [brand for brand in static_data.get('marcas', []) if brand is not None]
+
         if all_brands_selected:
-            default_brands = static_data.get('marcas', [])
+            default_brands = available_brands  # Selecionar todas as marcas disponíveis
         else:
-            default_brands = st.session_state.get('selected_brands', [])
-        
+            default_brands = [
+                brand for brand in st.session_state.get('selected_brands', []) 
+                if brand in available_brands
+            ]  # Apenas marcas válidas
+
         selected_brands = st.multiselect(
             "Marcas",
-            options=[brand for brand in static_data.get('marcas', []) if brand is not None],
+            options=available_brands,
             default=default_brands
         )
+
+
+
     
     st.session_state.selected_brands = selected_brands if not all_brands_selected else static_data.get('marcas', [])
 
@@ -177,36 +185,51 @@ def main():
             data = st.session_state['trade_materials_data']
 
             # Métricas principais
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                total_materials = data['saldo_estoque'].sum()  # Definir antes de usar
-                st.markdown('<div data-testid="metric-container">', unsafe_allow_html=True)
-                st.metric("Total de Materiais", f"{total_materials:,.0f}".replace(',', '.'))
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-            with col2:
-                total_value = data['valor_total_estoque'].sum()
-                st.markdown(create_metric_html(
-                    "Valor Total em Estoque",
-                    total_value,
-                    is_currency=True
-                ), unsafe_allow_html=True)
-                
-            with col3:
-                total_used = data['quantidade_utilizada'].sum()
-                st.markdown(create_metric_html(
-                    "Total Utilizado",
-                    f"{total_used:,.0f}".replace(',', '.'),
-                    is_currency=False
-                ), unsafe_allow_html=True)
-                
-            with col4:
-                usage_rate = (total_used / total_materials * 100) if total_materials > 0 else 0
-                st.markdown(create_metric_html(
-                    "Taxa de Utilização",
-                    f"{usage_rate:.1f}%",
-                    is_currency=False
-                ), unsafe_allow_html=True)
+            col1, col2, col3 = st.columns(3)
+            # Métricas iniciais com layout aprimorado
+            # Calcular valores primeiro
+            # Calcular métricas uma única vez no início
+            total_materials = data['saldo_estoque'].sum()
+            total_used = data['quantidade_utilizada'].sum()
+            usage_rate = (total_used / total_materials * 100) if total_materials > 0 else 0
+            total_value = data['valor_total_estoque'].sum()
+
+            # Exibir métricas em um único layout
+            st.markdown("""
+            <div style="display: flex; justify-content: space-between; gap: 20px; margin: 20px 0;">
+                <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
+                    <div style="font-size: 16px; color: #666;">Total de Materiais</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">{:,.0f}</div>
+                </div>
+                <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
+                    <div style="font-size: 16px; color: #666;">Taxa de Utilização</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">{:.1f}%</div>
+                </div>
+                <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
+                    <div style="font-size: 16px; color: #666;">Valor Total</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">R$ {:,.2f}</div>
+                </div>
+                <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
+                    <div style="font-size: 16px; color: #666;">Quantidade Utilizada</div>
+                    <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">{:,.0f}</div>
+                </div>
+            </div>
+            """.format(total_materials, usage_rate, total_value, total_used), unsafe_allow_html=True)
+
+
+            #with col1:
+                #total_materials = data['saldo_estoque'].sum()  # Definir antes de usar
+                #st.metric("Total de Materiais", f"{total_materials:,.0f}".replace(',', '.'))
+  
+               
+            #with col3:
+                #total_used = data['quantidade_utilizada'].sum()
+                #usage_rate = (usage_rate) 
+                #st.markdown(create_metric_html(
+                    #"Taxa de Utilização",
+                    #f"{usage_rate:.1f}%",
+                    #is_currency=False
+                #), unsafe_allow_html=True)
 
             # Criar as tabs
             if 'current_tab' not in st.session_state:
@@ -301,26 +324,7 @@ def main():
                 st.subheader("Detalhamento dos Materiais")
                 
                 # Métricas em cards
-                st.markdown("""
-                <div style="display: flex; justify-content: space-between; gap: 20px; margin: 20px 0;">
-                    <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
-                        <div style="font-size: 16px; color: #666;">Total SKUs</div>
-                        <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">{}</div>
-                    </div>
-                    <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
-                        <div style="font-size: 16px; color: #666;">Valor Total</div>
-                        <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">R$ {:,.2f}</div>
-                    </div>
-                    <div style="background: #f0f2f6; padding: 20px; border-radius: 10px; flex: 1; text-align: center;">
-                        <div style="font-size: 16px; color: #666;">Quantidade Utilizada</div>
-                        <div style="font-size: 24px; font-weight: bold; color: #1f77b4; margin-top: 10px;">{:,.0f}</div>
-                    </div>
-                </div>
-                """.format(
-                    len(filtered_data['cod_produto'].unique()), 
-                    filtered_data['valor_total_estoque'].sum(),
-                    filtered_data['quantidade_utilizada'].sum()
-                ), unsafe_allow_html=True)
+
                 # Filtros locais
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
