@@ -15,6 +15,16 @@ from io import BytesIO
 import numpy as np
 from datetime import datetime, timedelta
 import time
+import sys
+import os
+
+# Adicionar o caminho do componente ao sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Agora importar o componente
+# No início do arquivo, onde estão os outros imports#
+from components.MetricsDisplay import MetricsDisplay
+
 
 # Configurar logging
 logging.basicConfig(
@@ -302,7 +312,40 @@ def generate_excel_report(data_with_sales=None, data_without_sales=None):
     
     return output.getvalue()
 
+def format_currency(value):
+    """Formata valor monetário para o padrão brasileiro"""
+    return f"R$ {value:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
 
+def format_number(value):
+    """Formata números com separador de milhares"""
+    return f"{value:,}".replace(',', '.')
+
+def calculate_stock_turnover(abc_data, start_date, end_date):
+    """Calcula o giro de estoque"""
+    days_period = (end_date - start_date).days
+    venda_media_diaria = (
+        abc_data['quantidade_vendida'].sum() + 
+        abc_data['quantidade_bonificada'].sum()
+    ) / days_period
+            
+    quantidade_estoque = abc_data['saldo_estoque'].sum()
+    return f"{quantidade_estoque / venda_media_diaria:.2f}x dias" if venda_media_diaria > 0 else "0x dias"
+
+def calculate_curve_metrics(abc_data):
+    """Calcula métricas por curva ABC"""
+    curvas = abc_data.groupby('curva')['sku'].nunique()
+    total_skus_curvas = curvas.sum()
+            
+    def format_curve(curve_value):
+        if curve_value == 0:
+            return "0 SKUs (0.0%)"
+        return f"{curve_value:,.0f} SKUs ({curve_value/total_skus_curvas*100:.1f}%)".replace(',', '.')
+            
+    return {
+        'A': format_curve(curvas.get('A', 0)),
+        'B': format_curve(curvas.get('B', 0)),
+        'C': format_curve(curvas.get('C', 0))
+    }
 def create_abc_regional_analysis():
     st.title("Análise ABC Regional com Estoque")
     
@@ -365,53 +408,37 @@ def create_abc_regional_analysis():
             st.info("Clique em 'Atualizar Dados' para carregar a análise.")
             return
 
-
         # Métricas principais
-        total_faturamento = st.session_state['abc_data']['faturamento_liquido'].sum()
-        total_estoque = st.session_state['abc_data']['valor_estoque'].sum()
-        total_skus = len(st.session_state['abc_data']['sku'].unique())
+        try:
+            # Calcular métricas principais
+            total_faturamento = st.session_state['abc_data']['faturamento_liquido'].sum()
+            total_estoque = st.session_state['abc_data']['valor_estoque'].sum()
+            total_skus = len(st.session_state['abc_data']['sku'].unique())
 
-        # Calcular giro de estoque
-        days_period = (st.session_state['end_date'] - st.session_state['start_date']).days
-        venda_media_diaria = (
-            st.session_state['abc_data']['quantidade_vendida'].sum() + 
-            st.session_state['abc_data']['quantidade_bonificada'].sum()
-        ) / days_period
-        
-        quantidade_estoque = st.session_state['abc_data']['saldo_estoque'].sum()
-        giro_estoque = f"{quantidade_estoque / venda_media_diaria:.2f}x dias" if venda_media_diaria > 0 else "0x dias"
+            # Calcular giro de estoque
+            giro_estoque = calculate_stock_turnover(
+                st.session_state['abc_data'],
+                st.session_state['start_date'],
+                st.session_state['end_date']
+            )
 
-        # Calcular métricas por curva
-        curvas = st.session_state['abc_data'].groupby('curva')['sku'].nunique()
-        total_skus = curvas.sum()
-        
-        curva_a = f"{curvas.get('A', 0):,.0f} SKUs ({curvas.get('A', 0)/total_skus*100:.1f}%)".replace(',', '.')
-        curva_b = f"{curvas.get('B', 0):,.0f} SKUs ({curvas.get('B', 0)/total_skus*100:.1f}%)".replace(',', '.')
-        curva_c = f"{curvas.get('C', 0):,.0f} SKUs ({curvas.get('C', 0)/total_skus*100:.1f}%)".replace(',', '.')
+            # Calcular métricas por curva
+            curve_metrics = calculate_curve_metrics(st.session_state['abc_data'])
 
-        # Renderizar o componente React
-        st.markdown("""
-            <div id="metrics-root"></div>
-            <script>
-                const props = {
-                    faturamentoTotal: "R$ " + Number(%s).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}),
-                    valorEstoque: "R$ " + Number(%s).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}),
-                    totalSkus: Number(%s).toLocaleString('pt-BR'),
-                    giroEstoque: "%s",
-                    curvaA: "%s",
-                    curvaB: "%s",
-                    curvaC: "%s"
-                };
-            </script>
-        """ % (
-            total_faturamento,
-            total_estoque,
-            total_skus,
-            giro_estoque,
-            curva_a,
-            curva_b,
-            curva_c
-        ), unsafe_allow_html=True)
+            # Renderizar o componente - removido st.write()
+            MetricsDisplay(
+                faturamentoTotal=format_currency(total_faturamento),
+                valorEstoque=format_currency(total_estoque),
+                totalSkus=format_number(total_skus),
+                giroEstoque=giro_estoque,
+                curvaA=curve_metrics['A'],
+                curvaB=curve_metrics['B'],
+                curvaC=curve_metrics['C']
+            )
+
+        except Exception as e:
+            st.error(f"Erro ao processar métricas: {str(e)}")
+            logging.error(f"Erro no processamento de métricas: {str(e)}", exc_info=True)
 
         
         # Criar as tabs
@@ -492,7 +519,6 @@ def create_abc_regional_analysis():
 
         # Tab 3 - Produtos Vendidos
         with tab3:
-            st.subheader("Detalhamento - Produtos com Venda no Período")
             filtered_data = st.session_state['data_with_sales'].copy()
             
             # 1. Filtros

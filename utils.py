@@ -334,6 +334,7 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
         AND pedidos.operacoes_internas = 'N'
         AND pedidos.dt_faturamento BETWEEN DATE('{start_date}') AND DATE('{end_date}')
         AND empresa_pedido.cod_empresa_faturamento not in ('9','21')
+        
             {channel_filter}
             {uf_filter}
             {brand_filter}
@@ -829,7 +830,7 @@ def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels,
             'VENDA MERCADORIA FORA ESTADO', 'VENDA MERC. SUJEITA AO REGIME DE ST'
         )
         AND pedidos.operacoes_internas = 'N'
-        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')        
         {channel_filter}
         {uf_filter}
         {brand_filter}
@@ -850,7 +851,7 @@ def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels,
             'BONIFICADO','BONIFICADO STORE','BONIFICADO FORA DO ESTADO',
             'REMESSA EM BONIFICAÇÃO','BRINDE OU DOAÇÃO','BRINDE','CAMPANHA','PROMOCAO'
         )
-        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')
+        AND date(pedidos."dt_faturamento") BETWEEN date('{start_date}') AND date('{end_date}')        
         {channel_filter}
         {uf_filter}
         {brand_filter}
@@ -870,6 +871,7 @@ def get_abc_curve_data(cod_colaborador, start_date, end_date, selected_channels,
             SUM(e.saldo_estoque * e.custo_total) as valor_estoque
         FROM "databeautykami"."tbl_varejo_saldo_estoque" e
         WHERE e.cod_empresa not in ('9','21')
+        and upper(e.cod_produto) not in (Select upper(cod_produto) from databeautykami.tbl_distribuicao_material_apoio)
         GROUP BY 1,3,4,5
     ),  
     faturamento_total AS (
