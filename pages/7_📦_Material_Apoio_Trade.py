@@ -66,26 +66,20 @@ def load_filters():
     all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
 
     with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
+        # Filtrar valores None e tratar lista de marcas
         available_brands = [brand for brand in static_data.get('marcas', []) if brand is not None]
-
+        
         if all_brands_selected:
-            default_brands = available_brands  # Selecionar todas as marcas disponíveis
+            default_brands = available_brands
         else:
-            default_brands = [
-                brand for brand in st.session_state.get('selected_brands', []) 
-                if brand in available_brands
-            ]  # Apenas marcas válidas
-
+            default_brands = st.session_state.get('selected_brands', [])
+            
         selected_brands = st.multiselect(
             "Marcas",
-            options=available_brands,
+            options=available_brands,  # Usando a lista filtrada
             default=default_brands
         )
-
-
-
-    
-    st.session_state.selected_brands = selected_brands if not all_brands_selected else static_data.get('marcas', [])
+    st.session_state.selected_brands = selected_brands if not all_brands_selected else available_brands        
 
 def generate_excel_report(data):
         output = BytesIO()

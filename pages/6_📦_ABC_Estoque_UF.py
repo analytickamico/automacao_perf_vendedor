@@ -105,21 +105,25 @@ def load_filters():
     )
     
     # Brand filter with "Select All" option
+# Brand filter with "Select All" option
     all_brands_selected = st.sidebar.checkbox("Selecionar Todas as Marcas", value=False)
-    
+
     with st.sidebar.expander("Selecionar/Excluir Marcas Específicas", expanded=False):
+        # Filtrar valores None e tratar lista de marcas
+        available_brands = [brand for brand in static_data.get('marcas', []) if brand is not None]
+        
         if all_brands_selected:
-            default_brands = static_data.get('marcas', [])
+            default_brands = available_brands
         else:
             default_brands = st.session_state.get('selected_brands', [])
-        
+            
         selected_brands = st.multiselect(
             "Marcas",
-            options=[brand for brand in static_data.get('marcas', []) if brand is not None],
+            options=available_brands,  # Usando a lista filtrada
             default=default_brands
         )
-    
-    st.session_state.selected_brands = selected_brands if not all_brands_selected else static_data.get('marcas', [])
+
+    st.session_state.selected_brands = selected_brands if not all_brands_selected else available_brands
 
 def merge_abc_with_stock(abc_data, stock_data):
     """Merge ABC curve data with stock data"""
@@ -363,64 +367,51 @@ def create_abc_regional_analysis():
 
 
         # Métricas principais
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            total_faturamento = st.session_state['abc_data']['faturamento_liquido'].sum()
-            st.markdown(create_metric_html("Faturamento Total", total_faturamento, is_currency=True), unsafe_allow_html=True)
-        with col2:
-            total_estoque = st.session_state['abc_data']['valor_estoque'].sum()
-            st.markdown(create_metric_html("Valor Total em Estoque", total_estoque, is_currency=True), unsafe_allow_html=True)
-        with col3:
-            total_skus = len(st.session_state['abc_data']['sku'].unique())
-            st.markdown(create_metric_html("Total de SKUs", f"{total_skus:,.0f}".replace(',', '.'), is_currency=False), unsafe_allow_html=True)
+        total_faturamento = st.session_state['abc_data']['faturamento_liquido'].sum()
+        total_estoque = st.session_state['abc_data']['valor_estoque'].sum()
+        total_skus = len(st.session_state['abc_data']['sku'].unique())
 
-        # Métricas de SKUs por curva
-        st.subheader("Distribuição de SKUs por Curva")
+        # Calcular giro de estoque
+        days_period = (st.session_state['end_date'] - st.session_state['start_date']).days
+        venda_media_diaria = (
+            st.session_state['abc_data']['quantidade_vendida'].sum() + 
+            st.session_state['abc_data']['quantidade_bonificada'].sum()
+        ) / days_period
         
-        # Calcular quantidade e percentual de SKUs por curva
-        skus_por_curva = st.session_state['abc_data'].groupby('curva')['sku'].nunique().reset_index()
-        skus_por_curva['percentual'] = (skus_por_curva['sku'] / skus_por_curva['sku'].sum() * 100)
-        
-        # Exibir métricas de SKUs por curva
-        cols_curva = st.columns(4)
-        
-        # Giro de estoque no primeiro slot
-        with cols_curva[0]:
-            # Calculando a venda média diária
-            venda_media_diaria = (
-                st.session_state['abc_data']['quantidade_vendida'].sum()
-                + st.session_state['abc_data']['quantidade_bonificada'].sum()
-            ) / (st.session_state['end_date'] - st.session_state['start_date']).days
+        quantidade_estoque = st.session_state['abc_data']['saldo_estoque'].sum()
+        giro_estoque = f"{quantidade_estoque / venda_media_diaria:.2f}x dias" if venda_media_diaria > 0 else "0x dias"
 
-            # Quantidade em estoque
-            quantidade_estoque = st.session_state['abc_data']['saldo_estoque'].sum()
-
-            # Calculando o giro de estoque
-            if venda_media_diaria == 0:
-                giro_estoque = 0
-            else:
-                giro_estoque = quantidade_estoque / venda_media_diaria
-
-            st.markdown(
-                create_metric_html("Giro de Estoque", f"{giro_estoque:.2f}x dias", is_currency=False),
-                unsafe_allow_html=True
-            )
+        # Calcular métricas por curva
+        curvas = st.session_state['abc_data'].groupby('curva')['sku'].nunique()
+        total_skus = curvas.sum()
         
-        # Métricas por curva
-        for idx, curva in enumerate(['A', 'B', 'C']):
-            with cols_curva[idx + 1]:
-                curva_data = skus_por_curva[skus_por_curva['curva'] == curva]
-                if not curva_data.empty:
-                    qtd_skus = int(curva_data['sku'].iloc[0])
-                    percentual = curva_data['percentual'].iloc[0]
-                    st.markdown(
-                        create_metric_html(
-                            f"Curva {curva}",
-                            f"{qtd_skus:,} SKUs ({percentual:.1f}%)".replace(',', '.'),
-                            is_currency=False
-                        ),
-                        unsafe_allow_html=True
-                    )
+        curva_a = f"{curvas.get('A', 0):,.0f} SKUs ({curvas.get('A', 0)/total_skus*100:.1f}%)".replace(',', '.')
+        curva_b = f"{curvas.get('B', 0):,.0f} SKUs ({curvas.get('B', 0)/total_skus*100:.1f}%)".replace(',', '.')
+        curva_c = f"{curvas.get('C', 0):,.0f} SKUs ({curvas.get('C', 0)/total_skus*100:.1f}%)".replace(',', '.')
+
+        # Renderizar o componente React
+        st.markdown("""
+            <div id="metrics-root"></div>
+            <script>
+                const props = {
+                    faturamentoTotal: "R$ " + Number(%s).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}),
+                    valorEstoque: "R$ " + Number(%s).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}),
+                    totalSkus: Number(%s).toLocaleString('pt-BR'),
+                    giroEstoque: "%s",
+                    curvaA: "%s",
+                    curvaB: "%s",
+                    curvaC: "%s"
+                };
+            </script>
+        """ % (
+            total_faturamento,
+            total_estoque,
+            total_skus,
+            giro_estoque,
+            curva_a,
+            curva_b,
+            curva_c
+        ), unsafe_allow_html=True)
 
         
         # Criar as tabs
