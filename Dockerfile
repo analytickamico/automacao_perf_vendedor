@@ -1,5 +1,4 @@
 FROM python:3.10-slim
-
 WORKDIR /app
 
 # Instalar dependências do sistema necessárias
@@ -12,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     awscli \
     && rm -rf /var/lib/apt/lists/*
 
+# Copiar requirements.txt
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -24,8 +24,15 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 # Copiar o código da aplicação
 COPY . .
 
-# Expor a porta do Streamlit
-EXPOSE 8501
+# Expor as portas do Streamlit
+EXPOSE 8501 8504
+
+# Script de inicialização
+RUN echo '#!/bin/bash\n\
+streamlit run 1_🏠_home.py --server.port 8501 & \n\
+streamlit run monitor_pedidos.py --server.port 8504 & \n\
+wait' > /app/start.sh && \
+chmod +x /app/start.sh
 
 # Comando para iniciar a aplicação
-CMD ["streamlit", "run", "1_🏠_home.py"]
+CMD ["/app/start.sh"]

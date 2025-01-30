@@ -1,27 +1,37 @@
 version: '3'
-
 services:
-  streamlit:
+  automacao_perf_vendedor:  # Mantém o nome atual do seu serviço
     build: /home/ubuntu/kami-datalake/services/automacao_perf_vendedor
     ports:
       - "8501:8501"
+      - "8504:8504"  # Nova porta para o monitor
     networks:
       - proxy
     env_file:
       - .env
     volumes:
       - ./data:/app/data
-      - ~/.aws:/root/.aws:ro  # Montando as credenciais da AWS
+      - ~/.aws:/root/.aws:ro
     environment:
-      - AWS_DEFAULT_REGION=us-east-1  # Substitua pela sua região
+      - AWS_DEFAULT_REGION=us-east-1
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.streamlit.rule=Host(`databeauty.aws.kamico.com.br`)"
+      # Configuração principal existente
+      - "traefik.http.routers.streamlit.rule=Host(`databeauty.aws.kamico.com.br`) && !(PathPrefix(`/fluxo_caixa`) || PathPrefix(`/analise`) || PathPrefix(`/monitor_pedidos`))"
       - "traefik.http.routers.streamlit.entrypoints=websecure"
       - "traefik.http.routers.streamlit.tls.certresolver=myresolver"
-      - "traefik.http.routers.streamlit-www.rule=Host(`www.databeauty.aws.kamico.com.br`)"
+      - "traefik.http.routers.streamlit-www.rule=Host(`www.databeauty.aws.kamico.com.br`) && !(PathPrefix(`/fluxo_caixa`) || PathPrefix(`/analise`) || PathPrefix(`/monitor_pedidos`))"
       - "traefik.http.routers.streamlit-www.entrypoints=websecure"
       - "traefik.http.routers.streamlit-www.tls.certresolver=myresolver"
+      - "traefik.http.services.streamlit.loadbalancer.server.port=8501"
+      - "traefik.http.routers.streamlit.priority=90"
+      - "traefik.http.routers.streamlit-www.priority=90"
+      # Configuração do monitor
+      - "traefik.http.routers.monitor.rule=Host(`databeauty.aws.kamico.com.br`) && PathPrefix(`/monitor_pedidos`)"
+      - "traefik.http.routers.monitor.entrypoints=websecure"
+      - "traefik.http.routers.monitor.tls.certresolver=myresolver"
+      - "traefik.http.services.monitor.loadbalancer.server.port=8504"
+      - "traefik.http.routers.monitor.priority=100"
     restart: unless-stopped
 
 networks:
