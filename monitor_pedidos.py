@@ -9,7 +9,9 @@ import plotly.figure_factory as ff
 
 import streamlit as st
 
-# Configuração para esconder o menu lateral
+os.environ['STREAMLIT_SERVER_PORT'] = '8504'
+
+# Configuração da página
 st.set_page_config(
     page_title="Monitor de Pedidos",
     page_icon="📦",
@@ -17,7 +19,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Esconde o menu lateral e outros elementos
+# Esconder elementos desnecessários
 st.markdown("""
     <style>
         #MainMenu {visibility: hidden;}
