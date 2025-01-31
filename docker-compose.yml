@@ -4,7 +4,6 @@ services:
     build: /home/ubuntu/kami-datalake/services/automacao_perf_vendedor
     ports:
       - "8501:8501"
-      - "8504:8504"
     networks:
       - proxy
     env_file:
@@ -17,20 +16,10 @@ services:
     labels:
       - "traefik.enable=true"
       # Configuração para a aplicação principal na porta 8501
-      - "traefik.http.routers.app-main.rule=Host(`databeauty.aws.kamico.com.br`) && !(PathPrefix(`/monitor_pedidos`))"
       - "traefik.http.routers.app-main.entrypoints=websecure"
       - "traefik.http.routers.app-main.tls.certresolver=myresolver"
-      - "traefik.http.services.app-main.loadbalancer.server.port=8501"
-      
-      # Configuração para o monitor na porta 8504
-      - "traefik.http.routers.monitor.rule=Host(`databeauty.aws.kamico.com.br`) && PathPrefix(`/monitor_pedidos`)"
-      - "traefik.http.routers.monitor.entrypoints=websecure"
-      - "traefik.http.routers.monitor.tls.certresolver=myresolver"
-      - "traefik.http.services.monitor.loadbalancer.server.port=8504"
-      
-      # Serviço middleware para o monitor
-      - "traefik.http.middlewares.monitor-strip.stripprefix.prefixes=/monitor_pedidos"
-      - "traefik.http.routers.monitor.middlewares=monitor-strip"
+      - "traefik.http.services.app-main.loadbalancer.server.port=8501"     
+
     restart: unless-stopped
 
 networks:
