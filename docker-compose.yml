@@ -1,25 +1,35 @@
-version: '3'
 services:
   automacao_perf_vendedor:
-    build: /home/ubuntu/kami-datalake/services/automacao_perf_vendedor
+    build: .
     ports:
       - "8501:8501"
     networks:
       - proxy
-    env_file:
-      - .env
     volumes:
       - ./data:/app/data
       - ~/.aws:/root/.aws:ro
     environment:
       - AWS_DEFAULT_REGION=us-east-1
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+      - STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=false
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
     labels:
       - "traefik.enable=true"
-      # Configuração para a aplicação principal na porta 8501
-      - "traefik.http.routers.app-main.entrypoints=websecure"
-      - "traefik.http.routers.app-main.tls.certresolver=myresolver"
-      - "traefik.http.services.app-main.loadbalancer.server.port=8501"     
-
+      # Router HTTP
+      - "traefik.http.routers.streamlit.rule=Host(`databeauty.aws.kamico.com.br`)"
+      - "traefik.http.routers.streamlit.entrypoints=web"
+      - "traefik.http.routers.streamlit.middlewares=redirect-to-https@docker"
+      # Router HTTPS
+      - "traefik.http.routers.streamlit-www.rule=Host(`www.databeauty.aws.kamico.com.br`)"
+      - "traefik.http.routers.streamlit-www.entrypoints=websecure"
+      - "traefik.http.routers.streamlit-www.tls.certresolver=myresolver"
+      # Service
+      - "traefik.http.services.streamlit.loadbalancer.server.port=8501"
+      # Redirect HTTP to HTTPS
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
     restart: unless-stopped
 
 networks:
