@@ -18,19 +18,18 @@ services:
     labels:
       - "traefik.enable=true"
       # Router HTTP
-      - "traefik.http.routers.streamlit-http.rule=Host(`databeauty.aws.kamico.com.br`)"
-      - "traefik.http.routers.streamlit-http.entrypoints=web"
-      - "traefik.http.routers.streamlit-http.middlewares=redirect-to-https@docker"
-      # Router HTTPS
       - "traefik.http.routers.streamlit.rule=Host(`databeauty.aws.kamico.com.br`)"
-      - "traefik.http.routers.streamlit.entrypoints=websecure"
-      - "traefik.http.routers.streamlit.tls.certresolver=myresolver"
+      - "traefik.http.routers.streamlit.entrypoints=web"
+      - "traefik.http.routers.streamlit.middlewares=redirect-to-https@docker"
+      # Router HTTPS
+      - "traefik.http.routers.streamlit-www.rule=Host(`www.databeauty.aws.kamico.com.br`)"
+      - "traefik.http.routers.streamlit-www.entrypoints=websecure"
+      - "traefik.http.routers.streamlit-www.tls.certresolver=myresolver"
       # Service
       - "traefik.http.services.streamlit.loadbalancer.server.port=8501"
       # Redirect HTTP to HTTPS
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
-    command: python -m streamlit run 1_🏠_home.py --server.port=8501 --server.address=0.0.0.0
     restart: unless-stopped
 
 networks:
