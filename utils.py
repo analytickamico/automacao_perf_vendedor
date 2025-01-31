@@ -293,7 +293,7 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
     empresa_filter = ""
     empresa_filter_stock = ""
     brand_filter_stock = ""
-
+    uf_filter_stocks = ""
         # Filtro de marcas
     if selected_brands:
         brands_str = "', '".join(selected_brands)
@@ -305,6 +305,9 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
         empresas_str = "', '".join([str(empresa) for empresa in selected_empresas if empresa is not None])
         empresa_filter = format_filter(selected_empresas, "empresa_pedido.nome_empresa_faturamento")    
         empresa_filter_stock = format_filter(selected_empresas, "e.empresa")    
+    
+    uf_filter_stocks = f"AND e.uf_empresa IN ('{','.join(selected_ufs)}')" if selected_ufs else ""
+
 
 
 
@@ -390,6 +393,7 @@ def get_stock_data(start_date, end_date, selected_channels, selected_ufs, select
     WHERE e.cod_empresa not in ('9','21')
     {empresa_filter_stock}
     {brand_filter_stock}
+    {uf_filter_stocks}
     and upper(e.cod_produto) not in (Select upper(cod_produto) from databeautykami.tbl_distribuicao_material_apoio)
     GROUP BY 1,2,3,4,6,7,8,9,10,11,12,13,14
     """
@@ -645,7 +649,11 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
     if selected_brands:
         brands_str = "', '".join(selected_brands)
         brand_filter = format_filter(selected_brands, "item_pedidos.marca") 
-        brand_filter_stock = format_filter(selected_brands, "e.marca")           
+        brand_filter_stock = format_filter(selected_brands, "e.marca")      
+
+    if  selected_ufs:
+        ufs_str = "', '".join(selected_ufs)
+        uf_filter_stock = f"AND e.uf_empresa IN ('{ufs_str}')"     
 
     #empresa_filter = f"AND empresa_pedido.empresa IN ({','.join([f"'{e}'" for e in selected_empresas])})" if selected_empresas else ""        
 
@@ -731,6 +739,7 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
       WHERE cod_empresa not in ('9','21')
       {empresa_filter_stock}
       {brand_filter_stock}
+      {uf_filter_stock}
       and upper(cod_produto) not in (Select upper(cod_produto) from databeautykami.tbl_distribuicao_material_apoio)
 
       GROUP BY
