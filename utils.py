@@ -621,6 +621,7 @@ def get_abc_curve_data_with_stock(cod_colaborador, start_date, end_date, selecte
     empresa_filter = ""
     empresa_filter_stock = ""
     brand_filter_stock = ""
+    uf_filter_stock = ""
 
     # Filtros (mesma lógica da função original)    
     if selected_channels:
